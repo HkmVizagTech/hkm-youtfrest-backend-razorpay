@@ -37,6 +37,11 @@ const candidateSchema = new mongoose.Schema({
 
   attendance: { type: Boolean, default: false },
 
+  adminAttendance: { type: Boolean, default: false },
+  adminAttendanceDate: { type: Date },
+  attendanceToken: { type: String }, 
+
+
   paymentUpdatedBy: { type: String, enum: ['manual', 'webhook'], default: 'manual' },
   razorpayPaymentData: { type: mongoose.Schema.Types.Mixed },
 }, { timestamps: true });
