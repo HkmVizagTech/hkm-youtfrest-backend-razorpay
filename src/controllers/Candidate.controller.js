@@ -252,23 +252,23 @@ const CandidateController = {
     }
   },
 
-  verifyPaymentId: async (req, res) => {
-    const { id: paymentId } = req.params;
-    try {
-      const candidate = await Candidate.findOne({ paymentId });
-      if (!candidate) {
-        return res.status(404).json({ success: false, message: "No matching candidate found for this payment ID." });
-      }
-      return res.status(200).json({
-        success: true,
-        message: "Payment verified",
-        candidate,
-      });
-    } catch (err) {
-      console.error("Payment fetch failed:", err.message);
-      return res.status(500).json({ success: false, message: "Error verifying payment ID" });
+ verifyPaymentId: async (req, res) => {
+  const { id: paymentId } = req.params;
+  try {
+    const candidate = await Candidate.findOne({ paymentId });
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: "No matching candidate found for this payment ID." });
     }
+    return res.status(200).json({
+      success: true,
+      message: "Payment verified",
+      candidate,
+    });
+  } catch (err) {
+    console.error("Payment fetch failed:", err.message);
+    return res.status(500).json({ success: false, message: "Error verifying payment ID" });
   }
+}
 
 
 };
