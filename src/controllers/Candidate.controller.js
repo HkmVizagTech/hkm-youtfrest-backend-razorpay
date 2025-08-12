@@ -197,40 +197,129 @@ const CandidateController = {
     }
   },
 
+
+
   markAttendance: async (req, res) => {
-    const { whatsappNumber } = req.body;
-    let normalizedNumber;
-    try {
-      if (!whatsappNumber) {
-        return res.status(400).json({ message: "WhatsApp number is required" });
-      }
-      if (/^\d{10}$/.test(whatsappNumber)) {
-        normalizedNumber = "91" + whatsappNumber;
-      } else if (/^91\d{10}$/.test(whatsappNumber)) {
-        normalizedNumber = whatsappNumber;
-      } else {
-        return res.status(400).json({ message: "Invalid WhatsApp number format" });
-      }
-
-      const candidate = await Candidate.findOne({ whatsappNumber: normalizedNumber });
-
-      if (!candidate) {
-        return res.status(404).json({ message: "Candidate not found" });
-      }
-      if (candidate.attendance === true) {
-        return res.json({ status: "already-marked", message: "Attendance already taken" });
-      }
-
-      candidate.attendance = true;
-      await candidate.save();
-      await sendWhatsappGupshup(candidate, [candidate.name], "88021e4e-88ae-4cba-bdba-f9b1be3b4948");
-
-      res.json({ status: "success", name: candidate.name });
-    } catch (err) {
-      console.error("Attendance marking error:", err);
-      res.status(500).json({ message: "Server error" });
+  const { whatsappNumber } = req.body;
+  let normalizedNumber;
+  try {
+    if (!whatsappNumber) {
+      return res.status(400).json({ message: "WhatsApp number is required" });
     }
-  },
+    if (/^\d{10}$/.test(whatsappNumber)) {
+      normalizedNumber = "91" + whatsappNumber;
+    } else if (/^91\d{10}$/.test(whatsappNumber)) {
+      normalizedNumber = whatsappNumber;
+    } else {
+      return res.status(400).json({ message: "Invalid WhatsApp number format" });
+    }
+
+    const candidate = await Candidate.findOne({ whatsappNumber: normalizedNumber });
+
+    if (!candidate) {
+      return res.status(404).json({ message: "Candidate not found" });
+    }
+
+    if (!candidate.attendanceToken) {
+      candidate.attendanceToken = candidate._id.toString();
+      await candidate.save();
+    }
+
+    const details = {
+      status: candidate.attendance === true ? "already-marked" : "success",
+      message: candidate.attendance === true ? "Attendance already taken" : undefined,
+      attendanceToken: candidate.attendanceToken,
+      name: candidate.name,
+      email: candidate.email,
+      city: candidate.city,
+      gender: candidate.gender,
+      college: candidate.college,
+      branch: candidate.branch,
+      
+    };
+
+    if (candidate.attendance === true) {
+      return res.json(details);
+    }
+
+    candidate.attendance = true;
+    await candidate.save();
+    await sendWhatsappGupshup(candidate, [candidate.name], "88021e4e-88ae-4cba-bdba-f9b1be3b4948");
+
+    res.json(details);
+  } catch (err) {
+    console.error("Attendance marking error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+},
+
+
+
+adminAttendanceScan: async (req, res) => {
+  const { token } = req.body;
+  try {
+    const candidate = await Candidate.findOne({ attendanceToken: token });
+    if (!candidate) {
+      return res.status(404).json({ message: "Candidate not found" });
+    }
+    if (!candidate.attendance) {
+      return res.status(400).json({ message: "Candidate did not mark attendance" });
+    }
+    if (candidate.adminAttendance) {
+      // Always return details, even if already marked
+      return res.status(200).json({
+        status: "already-marked",
+        message: "Admin already marked attendance",
+        name: candidate.name,
+        email: candidate.email,
+        phone: candidate.phone,
+        city: candidate.city,
+        gender: candidate.gender,
+        college: candidate.college,
+        branch: candidate.branch,
+      });
+    }
+    candidate.adminAttendance = true;
+    candidate.adminAttendanceDate = new Date();
+    await candidate.save();
+    return res.status(200).json({
+      status: "success",
+      message: "Admin attendance marked",
+      name: candidate.name,
+      email: candidate.email,
+      phone: candidate.phone,
+      city: candidate.city,
+      gender: candidate.gender,
+      college: candidate.college,
+      branch: candidate.branch,
+    });
+  } catch (err) {
+    console.error("Admin attendance scan error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+},
+
+adminScannedList: async (req, res) => {
+  try {
+    const scannedCandidates = await Candidate.find(
+      { adminAttendance: true },
+      {
+        name: 1,
+        email: 1,
+        phone: 1,
+        gender: 1,
+        college: 1,
+        branch: 1,
+        adminAttendanceDate: 1,
+        _id: 1
+      }
+    ).sort({ adminAttendanceDate: -1 });
+    res.status(200).json(scannedCandidates);
+  } catch (err) {
+    console.error("Error fetching admin scanned list:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+},
 
   attendanceList: async (req, res) => {
     try {
