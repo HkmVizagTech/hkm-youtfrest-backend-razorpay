@@ -4,6 +4,7 @@ const { Connection } = require('./src/config/db');
 const { CandidateRouter } = require('./src/routes/candidate.routes');
 const bodyParser = require('body-parser');
 const { CandidateController } = require('./src/controllers/Candidate.controller');
+const {userRouter} = require('./src/routes/user.Routes');
 
 const app = express();
 
@@ -23,6 +24,8 @@ app.get('/', (req, res) => {
 });
 
 app.use("/users", CandidateRouter);
+app.use("/admin/users", userRouter)
+
 
 const PORT = process.env.PORT || 3300;
 

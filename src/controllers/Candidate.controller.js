@@ -266,7 +266,7 @@ adminAttendanceScan: async (req, res) => {
       return res.status(400).json({ message: "Candidate did not mark attendance" });
     }
     if (candidate.adminAttendance) {
-      // Always return details, even if already marked
+     
       return res.status(200).json({
         status: "already-marked",
         message: "Admin already marked attendance",
