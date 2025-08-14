@@ -199,7 +199,7 @@ const CandidateController = {
 
 
 
-  markAttendance: async (req, res) => {
+markAttendance: async (req, res) => {
   const { whatsappNumber } = req.body;
   let normalizedNumber;
   try {
@@ -214,10 +214,17 @@ const CandidateController = {
       return res.status(400).json({ message: "Invalid WhatsApp number format" });
     }
 
-    const candidate = await Candidate.findOne({ whatsappNumber: normalizedNumber });
+    let candidate = await Candidate.findOne(
+      { whatsappNumber: normalizedNumber, paymentStatus: "Paid" }
+    ).sort({ createdAt: -1 });
 
     if (!candidate) {
-      return res.status(404).json({ message: "Candidate not found" });
+      const latestCandidate = await Candidate.findOne({ whatsappNumber: normalizedNumber }).sort({ createdAt: -1 });
+      if (latestCandidate) {
+        return res.status(403).json({ message: "Payment not completed. Attendance cannot be marked." });
+      } else {
+        return res.status(404).json({ message: "Candidate not found" });
+      }
     }
 
     if (!candidate.attendanceToken) {
@@ -235,7 +242,6 @@ const CandidateController = {
       gender: candidate.gender,
       college: candidate.college,
       branch: candidate.branch,
-      
     };
 
     if (candidate.attendance === true) {
@@ -252,8 +258,6 @@ const CandidateController = {
     res.status(500).json({ message: "Server error" });
   }
 },
-
-
 
 adminAttendanceScan: async (req, res) => {
   const { token } = req.body;
