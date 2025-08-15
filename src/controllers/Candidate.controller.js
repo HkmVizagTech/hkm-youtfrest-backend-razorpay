@@ -366,7 +366,7 @@ sendTemplate: async (req, res) => {
   try {
     const users = await Candidate.find({
       paymentStatus: "Paid",
-      slot: "Morning"
+      slot: "Evening"
     });
 
     // WhatsApp number validation
@@ -383,8 +383,8 @@ sendTemplate: async (req, res) => {
     console.log("Total candidates:", users.length);
     console.log("Valid numbers:", validUsers.length);
 
-    const templateId = "b4af5540-be96-4c65-98a5-8c09ee42529d";
-    const templateParams = ["11 AM", "10 AM","Lunch Feast"]; // adjust as per your template
+    const templateId = "ce707c05-54ef-4e80-b0fd-c0f9885288f6";
+    // const templateParams = ["11 AM", "10 AM","Lunch Feast"]; // adjust as per your template
 
     let results = [];
     let count=0;
@@ -397,7 +397,7 @@ sendTemplate: async (req, res) => {
       try {
         const message = await gupshup.sendingTextTemplate(
           {
-            template: { id: templateId, params: templateParams },
+            template: { id: templateId, params: [user.name,"4 PM"] },
             'src.name': 'Production',
             destination: normalizedNumber,
             source: '917075176108',

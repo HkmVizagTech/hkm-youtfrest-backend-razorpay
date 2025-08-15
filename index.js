@@ -12,9 +12,9 @@ const {userRouter} = require('./src/routes/user.Routes');
 const app = express();
 
 app.use(cors());
-cron.schedule('* * * * *', () => {
-  console.log(`[TEST CRON] Running at ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`);
-}, { timezone: "Asia/Kolkata" });
+// cron.schedule('* * * * *', () => {
+//   console.log(`[TEST CRON] Running at ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`);
+// }, { timezone: "Asia/Kolkata" });
 
 app.post('/users/webhook', bodyParser.json({
   verify: (req, res, buf) => { req.rawBody = buf; }
@@ -33,85 +33,85 @@ app.use("/admin/users", userRouter)
 
 
 const PORT = process.env.PORT || 3300;
-async function sendTemplateJob({ paymentStatus, slot, templateParams }) {
-  try {
-    const users = await Candidate.find({ paymentStatus, slot });
+// async function sendTemplateJob({ paymentStatus, slot, templateParams }) {
+//   try {
+//     const users = await Candidate.find({ paymentStatus, slot });
 
-    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-    const isValidWhatsAppNumber = (number) =>
-      /^91\d{10}$/.test((number || "").replace(/\D/g, ""));
-    const validUsers = users.filter(user =>
-      isValidWhatsAppNumber(user.whatsappNumber)
-    );
+//     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+//     const isValidWhatsAppNumber = (number) =>
+//       /^91\d{10}$/.test((number || "").replace(/\D/g, ""));
+//     const validUsers = users.filter(user =>
+//       isValidWhatsAppNumber(user.whatsappNumber)
+//     );
 
-    console.log(`Total candidates with status "${paymentStatus}" and slot "${slot}":`, users.length);
-    console.log("Valid numbers:", validUsers.length);
+//     console.log(`Total candidates with status "${paymentStatus}" and slot "${slot}":`, users.length);
+//     console.log("Valid numbers:", validUsers.length);
 
-    const templateId = "ce707c05-54ef-4e80-b0fd-c0f9885288f6";
+//     const templateId = "ce707c05-54ef-4e80-b0fd-c0f9885288f6";
 
-    for (const user of validUsers) {
-      const normalizedNumber = user.whatsappNumber.replace(/\D/g, "");
-      try {
-        const message = await gupshup.sendingTextTemplate(
-          {
-            template: { id: templateId, params: templateParams },
-            'src.name': 'Production',
-            destination: normalizedNumber,
-            source: '917075176108',
-          },
-          { apikey: 'zbut4tsg1ouor2jks4umy1d92salxm38' }
-        );
+//     for (const user of validUsers) {
+//       const normalizedNumber = user.whatsappNumber.replace(/\D/g, "");
+//       try {
+//         const message = await gupshup.sendingTextTemplate(
+//           {
+//             template: { id: templateId, params: templateParams },
+//             'src.name': 'Production',
+//             destination: normalizedNumber,
+//             source: '917075176108',
+//           },
+//           { apikey: 'zbut4tsg1ouor2jks4umy1d92salxm38' }
+//         );
 
-        console.log(`✅ Sent to ${user.name}`);
-        await delay(1000); // 1 sec delay between sends
-      } catch (err) {
-        console.error(`❌ Failed for ${user.name} (${normalizedNumber}):`, err.message);
-      }
-    }
+//         console.log(`✅ Sent to ${user.name}`);
+//         await delay(1000); // 1 sec delay between sends
+//       } catch (err) {
+//         console.error(`❌ Failed for ${user.name} (${normalizedNumber}):`, err.message);
+//       }
+//     }
 
-    console.log("🎯 All messages processed");
-  } catch (err) {
-    console.error("Error in sendTemplateJob:", err);
-  }
-}
+//     console.log("🎯 All messages processed");
+//   } catch (err) {
+//     console.error("Error in sendTemplateJob:", err);
+//   }
+// }
 
-// --- Morning slot schedules ---
-cron.schedule('0 6 * * *', async () => {
-  console.log("⏰ Morning slot: 6 AM IST");
-  await sendTemplateJob({
-    paymentStatus: "Paid",
-    slot: "Morning",
-    templateParams: ["*11 PM*", "Lunch Feast"]
-  });
-}, { timezone: "Asia/Kolkata" });
+// // --- Morning slot schedules ---
+// cron.schedule('0 6 * * *', async () => {
+//   console.log("⏰ Morning slot: 6 AM IST");
+//   await sendTemplateJob({
+//     paymentStatus: "Paid",
+//     slot: "Morning",
+//     templateParams: ["*11 PM*", "Lunch Feast"]
+//   });
+// }, { timezone: "Asia/Kolkata" });
 
-cron.schedule('0 9 * * *', async () => {
-  console.log("⏰ Morning slot: 8 AM IST");
-  await sendTemplateJob({
-    paymentStatus: "Paid",
-    slot: "Morning",
-    templateParams: ["*11 AM*", "Lunch Feast"]
-  });
-}, { timezone: "Asia/Kolkata" });
+// cron.schedule('0 9 * * *', async () => {
+//   console.log("⏰ Morning slot: 8 AM IST");
+//   await sendTemplateJob({
+//     paymentStatus: "Paid",
+//     slot: "Morning",
+//     templateParams: ["*11 AM*", "Lunch Feast"]
+//   });
+// }, { timezone: "Asia/Kolkata" });
 
-// --- Evening slot schedules ---
-cron.schedule('0 6 * * *', async () => {
-  console.log("⏰ Evening slot: 6 AM IST");
-  await sendTemplateJob({
-    paymentStatus: "Paid",
-    slot: "Evening",
-    templateParams: ["*5 PM*", "Lunch Feast"]
-  });
-}, { timezone: "Asia/Kolkata" });
+// // --- Evening slot schedules ---
+// cron.schedule('0 6 * * *', async () => {
+//   console.log("⏰ Evening slot: 6 AM IST");
+//   await sendTemplateJob({
+//     paymentStatus: "Paid",
+//     slot: "Evening",
+//     templateParams: ["*5 PM*", "Lunch Feast"]
+//   });
+// }, { timezone: "Asia/Kolkata" });
 
-cron.schedule('0 15 * * *', async () => {
-  console.log("⏰ Evening slot: 3 PM IST");
-  await sendTemplateJob({
-    paymentStatus: "Paid",
-    slot: "Evening",
-    templateParams: ["*5 PM*", "Lunch Feast"]
-  });
-}, { timezone: "Asia/Kolkata" });
+// cron.schedule('0 15 * * *', async () => {
+//   console.log("⏰ Evening slot: 3 PM IST");
+//   await sendTemplateJob({
+//     paymentStatus: "Paid",
+//     slot: "Evening",
+//     templateParams: ["*5 PM*", "Lunch Feast"]
+//   });
+// }, { timezone: "Asia/Kolkata" });
 
 
 app.listen(PORT,'0.0.0.0', async () => {
