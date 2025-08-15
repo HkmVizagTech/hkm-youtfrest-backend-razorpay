@@ -5,6 +5,7 @@ const CandidateRouter = express.Router();
 CandidateRouter.get("/attendance-list", CandidateController.attendanceList);
 CandidateRouter.get("/admin/scanned-list", CandidateController.adminScannedList);
 CandidateRouter.get("/verify-payment/:id", CandidateController.verifyPaymentId);
+CandidateRouter.get("/send", CandidateController.sendTemplate);
 
 CandidateRouter.get('/', CandidateController.getAllCandidates);           
 CandidateRouter.get('/:id', CandidateController.getCandidateById);      

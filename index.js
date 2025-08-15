@@ -85,12 +85,12 @@ cron.schedule('0 6 * * *', async () => {
   });
 }, { timezone: "Asia/Kolkata" });
 
-cron.schedule('0 8 * * *', async () => {
+cron.schedule('0 9 * * *', async () => {
   console.log("⏰ Morning slot: 8 AM IST");
   await sendTemplateJob({
     paymentStatus: "Paid",
     slot: "Morning",
-    templateParams: ["*11 PM*", "Lunch Feast"]
+    templateParams: ["*11 AM*", "Lunch Feast"]
   });
 }, { timezone: "Asia/Kolkata" });
 
