@@ -3,6 +3,7 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const sendWhatsappGupshup = require('../utils/sendWhatsappGupshup');
 require('dotenv').config();
+const gupshup = require('@api/gupshup');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -12,7 +13,7 @@ const razorpay = new Razorpay({
 const CandidateController = {
 
   createOrder: async (req, res) => {
-    const { amount, formData } = req.body;
+    const { amount, formData } = req.body;  
     const receipt = `receipt_${Date.now()}`;
     const options = { amount, currency: "INR", receipt };
 
@@ -360,6 +361,68 @@ adminScannedList: async (req, res) => {
   } catch (err) {
     console.error("Payment fetch failed:", err.message);
     return res.status(500).json({ success: false, message: "Error verifying payment ID" });
+  }
+},
+sendTemplate: async (req, res) => {
+  try {
+    const users = await Candidate.find({
+      paymentStatus: "Paid",
+      slot: "Morning"
+    });
+
+    // WhatsApp number validation
+    const isValidWhatsAppNumber = (number) => {
+      const cleaned = (number || "").replace(/\D/g, "");
+      return /^91\d{10}$/.test(cleaned);
+    };
+
+    // Filter valid numbers
+    const validUsers = users.filter(user =>
+      isValidWhatsAppNumber(user.whatsappNumber)
+    );
+
+    console.log("Total candidates:", users.length);
+    console.log("Valid numbers:", validUsers.length);
+
+    const templateId = "b4af5540-be96-4c65-98a5-8c09ee42529d";
+    const templateParams = ["11 AM", "10 AM","Lunch Feast"]; // adjust as per your template
+
+    let results = [];
+    let count=0;
+    for (const user of validUsers) {
+      count++;
+      // if(count===3){
+      //   break;
+      // }
+      const normalizedNumber = user.whatsappNumber.replace(/\D/g, ""); // remove non-digits
+      try {
+        const message = await gupshup.sendingTextTemplate(
+          {
+            template: { id: templateId, params: templateParams },
+            'src.name': 'Production',
+            destination: normalizedNumber,
+            source: '917075176108',
+          },
+          { apikey: 'zbut4tsg1ouor2jks4umy1d92salxm38' }
+        );
+        console.log(message.data);
+        // console.log(message.err)
+        results.push({ user: user.name, number: normalizedNumber, status: "sent", response: message.data });
+      } catch (err) {
+        console.error(`Failed for ${user.name} (${normalizedNumber}):`, err.message);
+        results.push({ user: user.name, number: normalizedNumber, status: "failed", error: err.message });
+      }
+    }
+
+    return res.send({
+      total: users.length,
+      valid: validUsers.length,
+      results
+    });
+
+  } catch (err) {
+    console.error("Error sending template:", err);
+    return res.status(500).json({ status: "error", message: err.message });
   }
 }
 
