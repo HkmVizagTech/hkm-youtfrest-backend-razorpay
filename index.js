@@ -47,7 +47,7 @@ async function sendTemplateJob({ paymentStatus, slot, templateParams }) {
     console.log(`Total candidates with status "${paymentStatus}" and slot "${slot}":`, users.length);
     console.log("Valid numbers:", validUsers.length);
 
-    const templateId = "70919446-d04b-4cf5-bd60-33cbba696ca7";
+    const templateId = "ce707c05-54ef-4e80-b0fd-c0f9885288f6";
 
     for (const user of validUsers) {
       const normalizedNumber = user.whatsappNumber.replace(/\D/g, "");
@@ -81,7 +81,7 @@ cron.schedule('0 6 * * *', async () => {
   await sendTemplateJob({
     paymentStatus: "Paid",
     slot: "Morning",
-    templateParams: ["*11 PM*", "*10 PM*", "Lunch Feast"]
+    templateParams: ["*11 PM*", "Lunch Feast"]
   });
 }, { timezone: "Asia/Kolkata" });
 
@@ -90,7 +90,7 @@ cron.schedule('0 8 * * *', async () => {
   await sendTemplateJob({
     paymentStatus: "Paid",
     slot: "Morning",
-    templateParams: ["*11 PM*", "*10 PM*", "Lunch Feast"]
+    templateParams: ["*11 PM*", "Lunch Feast"]
   });
 }, { timezone: "Asia/Kolkata" });
 
@@ -100,7 +100,7 @@ cron.schedule('0 6 * * *', async () => {
   await sendTemplateJob({
     paymentStatus: "Paid",
     slot: "Evening",
-    templateParams: ["*5 PM*", "*4 PM*", "Lunch Feast"]
+    templateParams: ["*5 PM*", "Lunch Feast"]
   });
 }, { timezone: "Asia/Kolkata" });
 
@@ -109,7 +109,7 @@ cron.schedule('0 15 * * *', async () => {
   await sendTemplateJob({
     paymentStatus: "Paid",
     slot: "Evening",
-    templateParams: ["*5 PM*", "*4 PM*", "Lunch Feast"]
+    templateParams: ["*5 PM*", "Lunch Feast"]
   });
 }, { timezone: "Asia/Kolkata" });
 
