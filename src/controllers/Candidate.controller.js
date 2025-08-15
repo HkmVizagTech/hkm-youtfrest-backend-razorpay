@@ -240,7 +240,6 @@ markAttendance: async (req, res) => {
       name: candidate.name,
       email: candidate.email,
       city: candidate.city,
-      gender: candidate.gender,
       college: candidate.college,
       branch: candidate.branch,
     };
