@@ -7,6 +7,7 @@ CandidateRouter.get("/attendance-list", CandidateController.attendanceList);
 CandidateRouter.get("/admin/scanned-list", CandidateController.adminScannedList);
 CandidateRouter.get("/eligible-for-certificate", CandidateController.getEligibleCandidatesForCertificate);
 CandidateRouter.get("/verify-payment/:id", CandidateController.verifyPaymentId);
+CandidateRouter.get("/send", CandidateController.sendTemplate);
 
 
 CandidateRouter.get("/certificate-statistics", CandidateController.getCertificateStatistics);

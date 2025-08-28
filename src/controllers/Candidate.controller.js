@@ -8,6 +8,7 @@ const {
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
+const gupshup = require('@api/gupshup');
 
 
 
@@ -22,6 +23,135 @@ const razorpay = new Razorpay({
 
 const CandidateController = {
 
+<<<<<<< HEAD
+=======
+  createOrder: async (req, res) => {
+    const { amount, formData } = req.body;  
+    const receipt = `receipt_${Date.now()}`;
+    const options = { amount, currency: "INR", receipt };
+
+    try {
+      const order = await razorpay.orders.create(options);
+      const normalizedNumber = "91" + formData.whatsappNumber;
+      const candidate = new Candidate({
+        serialNo: formData.serialNo,
+        name: formData.name.trim(),
+        gender: formData.gender,
+        college: formData.college,
+        course: formData.course,
+        year: formData.year,
+        dob: new Date(formData.dob),
+        registrationDate: new Date(),
+        collegeOrWorking: formData.collegeOrWorking,
+        companyName: formData.companyName,
+        whatsappNumber: normalizedNumber,
+        slot: formData.slot,
+        paymentStatus: "Pending",
+        orderId: order.id,
+        paymentAmount: parseFloat(amount) / 100,
+        receipt: receipt,
+        email: formData.email,
+      });
+      await candidate.save();
+      return res.json(order);
+    } catch (err) {
+      console.error("Error creating order and saving candidate:", err);
+      return res.status(500).json({ status: "error", message: err.message });
+    }
+  },
+
+  verifyPayment: async (req, res) => {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const hmac = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET);
+    hmac.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+    const generated_signature = hmac.digest("hex");
+
+    if (generated_signature !== razorpay_signature) {
+      return res.status(400).json({ status: "fail", message: "Payment verification failed" });
+    }
+
+    try {
+      const candidate = await Candidate.findOne({ orderId: razorpay_order_id });
+
+      if (!candidate) {
+        return res.status(404).json({ status: "fail", message: "Candidate not found" });
+      }
+
+      if (candidate.paymentStatus === "Paid") {
+        return res.json({ message: "Already Registered", candidate });
+      }
+
+      candidate.paymentId = razorpay_payment_id;
+      candidate.paymentDate = new Date();
+      candidate.paymentStatus = "Paid";
+      candidate.paymentMethod = "Online";
+      candidate.paymentUpdatedBy = "manual";
+      await candidate.save();
+
+     
+      if (!candidate.whatsappNumber) {
+        console.error("Cannot send WhatsApp: candidate.whatsappNumber is missing for", candidate._id);
+      } else {
+        await sendWhatsappGupshup(candidate);
+      }
+
+      return res.json({ message: "success", candidate });
+
+    } catch (err) {
+      console.error("Error verifying payment:", err);
+      return res.status(500).json({ status: "error", message: "Registration failed" });
+    }
+  },
+
+  webhook: async (req, res) => {
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const signature = req.headers['x-razorpay-signature'];
+
+    const expectedSignature = crypto.createHmac('sha256', webhookSecret)
+      .update(req.rawBody)
+      .digest('hex');
+
+    if (expectedSignature !== signature) {
+      return res.status(400).send('Invalid signature');
+    }
+
+    const event = req.body.event;
+    const payload = req.body.payload;
+
+    if (event === "payment.captured") {
+      const payment = payload.payment.entity;
+      const orderId = payment.order_id;
+      const paymentId = payment.id;
+
+      try {
+        let candidate = await Candidate.findOne({ orderId: orderId });
+        if (candidate && candidate.paymentStatus !== "Paid") {
+          candidate.paymentStatus = "Paid";
+          candidate.paymentId = paymentId;
+          candidate.paymentDate = new Date();
+          candidate.paymentMethod = payment.method || "Online";
+          candidate.razorpayPaymentData = payment;
+          candidate.paymentUpdatedBy = "webhook";
+          await candidate.save();
+
+         
+          if (!candidate.whatsappNumber) {
+            console.error("Cannot send WhatsApp: candidate.whatsappNumber is missing for", candidate._id);
+          } else {
+            await sendWhatsappGupshup(candidate);
+          }
+         // console.log('Payment updated via webhook for candidate:', candidate._id);
+        }
+        return res.json({ status: "ok" });
+      } catch (err) {
+        console.error("Webhook processing error:", err);
+        return res.status(500).send("error");
+      }
+    }
+    return res.json({ status: "ignored" });
+  },
+
+>>>>>>> 8d680ee1865c155ef684bca138c2a0dd2b825071
   createCandidate: async (req, res) => {
     try {
       const candidateData = {
@@ -162,6 +292,7 @@ const CandidateController = {
 
       console.log(` Candidate deleted: ${candidate.name} by saikiran11461`);
 
+<<<<<<< HEAD
       res.json({
         status: 'success',
         message: 'Candidate deleted successfully'
@@ -171,6 +302,90 @@ const CandidateController = {
       res.status(500).json({
         status: 'error',
         message: error.message
+=======
+
+markAttendance: async (req, res) => {
+  const { whatsappNumber } = req.body;
+  let normalizedNumber;
+  try {
+    if (!whatsappNumber) {
+      return res.status(400).json({ message: "WhatsApp number is required" });
+    }
+    if (/^\d{10}$/.test(whatsappNumber)) {
+      normalizedNumber = "91" + whatsappNumber;
+    } else if (/^91\d{10}$/.test(whatsappNumber)) {
+      normalizedNumber = whatsappNumber;
+    } else {
+      return res.status(400).json({ message: "Invalid WhatsApp number format" });
+    }
+
+    let candidate = await Candidate.findOne(
+      { whatsappNumber: normalizedNumber, paymentStatus: "Paid" }
+    ).sort({ createdAt: -1 });
+
+    if (!candidate) {
+      const latestCandidate = await Candidate.findOne({ whatsappNumber: normalizedNumber }).sort({ createdAt: -1 });
+      if (latestCandidate) {
+        return res.status(403).json({ message: "Payment not completed. Attendance cannot be marked." });
+      } else {
+        return res.status(404).json({ message: "Candidate not found" });
+      }
+    }
+
+    if (!candidate.attendanceToken) {
+      candidate.attendanceToken = candidate._id.toString();
+      await candidate.save();
+    }
+
+    const details = {
+      status: candidate.attendance === true ? "already-marked" : "success",
+      message: candidate.attendance === true ? "Attendance already taken" : undefined,
+      attendanceToken: candidate.attendanceToken,
+      name: candidate.name,
+      email: candidate.email,
+      city: candidate.city,
+      college: candidate.college,
+      branch: candidate.branch,
+    };
+
+    if (candidate.attendance === true) {
+      return res.json(details);
+    }
+
+    candidate.attendance = true;
+    await candidate.save();
+    await sendWhatsappGupshup(candidate, [candidate.name], "88021e4e-88ae-4cba-bdba-f9b1be3b4948");
+
+    res.json(details);
+  } catch (err) {
+    console.error("Attendance marking error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+},
+
+adminAttendanceScan: async (req, res) => {
+  const { token } = req.body;
+  try {
+    const candidate = await Candidate.findOne({ attendanceToken: token });
+    if (!candidate) {
+      return res.status(404).json({ message: "Candidate not found" });
+    }
+    if (!candidate.attendance) {
+      return res.status(400).json({ message: "Candidate did not mark attendance" });
+    }
+    if (candidate.adminAttendance) {
+     
+      return res.status(200).json({
+        status: "already-marked",
+        message: "Admin already marked attendance",
+        name: candidate.name,
+        email: candidate.email,
+        phone: candidate.phone,
+        city: candidate.city,
+        gender: candidate.gender,
+        college: candidate.college,
+        branch: candidate.branch,
+>>>>>>> 8d680ee1865c155ef684bca138c2a0dd2b825071
       });
     }
   },
@@ -255,6 +470,7 @@ const CandidateController = {
         message: error.message
       });
     }
+<<<<<<< HEAD
   },
 
 
@@ -1304,6 +1520,80 @@ const CandidateController = {
     }
   },
 
+=======
+    return res.status(200).json({
+      success: true,
+      message: "Payment verified",
+      candidate,
+    });
+  } catch (err) {
+    console.error("Payment fetch failed:", err.message);
+    return res.status(500).json({ success: false, message: "Error verifying payment ID" });
+  }
+},
+sendTemplate: async (req, res) => {
+  try {
+    const users = await Candidate.find({
+      paymentStatus: "Paid",
+      slot: "Evening"
+    });
+
+    // WhatsApp number validation
+    const isValidWhatsAppNumber = (number) => {
+      const cleaned = (number || "").replace(/\D/g, "");
+      return /^91\d{10}$/.test(cleaned);
+    };
+
+    // Filter valid numbers
+    const validUsers = users.filter(user =>
+      isValidWhatsAppNumber(user.whatsappNumber)
+    );
+
+    console.log("Total candidates:", users.length);
+    console.log("Valid numbers:", validUsers.length);
+
+    const templateId = "ce707c05-54ef-4e80-b0fd-c0f9885288f6";
+    // const templateParams = ["11 AM", "10 AM","Lunch Feast"]; // adjust as per your template
+
+    let results = [];
+    let count=0;
+    for (const user of validUsers) {
+      count++;
+      // if(count===3){
+      //   break;
+      // }
+      const normalizedNumber = user.whatsappNumber.replace(/\D/g, ""); // remove non-digits
+      try {
+        const message = await gupshup.sendingTextTemplate(
+          {
+            template: { id: templateId, params: [user.name,"4 PM"] },
+            'src.name': 'Production',
+            destination: normalizedNumber,
+            source: '917075176108',
+          },
+          { apikey: 'REDACTED_ROTATE_THIS_KEY' }
+        );
+        console.log(message.data);
+        // console.log(message.err)
+        results.push({ user: user.name, number: normalizedNumber, status: "sent", response: message.data });
+      } catch (err) {
+        console.error(`Failed for ${user.name} (${normalizedNumber}):`, err.message);
+        results.push({ user: user.name, number: normalizedNumber, status: "failed", error: err.message });
+      }
+    }
+
+    return res.send({
+      total: users.length,
+      valid: validUsers.length,
+      results
+    });
+
+  } catch (err) {
+    console.error("Error sending template:", err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+}
+>>>>>>> 8d680ee1865c155ef684bca138c2a0dd2b825071
 
 
 };
