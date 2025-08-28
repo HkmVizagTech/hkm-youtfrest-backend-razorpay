@@ -1,0 +1,355 @@
+
+
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
+const { URLSearchParams } = require('url');
+const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+const fontkit = require('@pdf-lib/fontkit');
+const { v2: cloudinary } = require('cloudinary');
+
+
+const FONT_SIZE = 36;
+
+const GUPSHUP_API_KEY = process.env.GUPSHUP_API_KEY || 'REDACTED_ROTATE_THIS_KEY';
+const GUPSHUP_SOURCE = process.env.GUPSHUP_SOURCE || '917075176108';
+
+const GUPSHUP_APP_NAME = process.env.GUPSHUP_APP_NAME || '4KoeJVChI420QyWVhAW1kE7L';
+
+const GUPSHUP_TEMPLATE_ID = process.env.GUPSHUP_TEMPLATE_ID || '1e5b2dd0-3ee7-4d8d-bd41-9a80073b1399';
+
+const GUPSHUP_TEXT_TEMPLATE_ID = process.env.GUPSHUP_TEXT_TEMPLATE_ID || '';
+
+
+const GUPSHUP_WA_BASE = process.env.GUPSHUP_WA_BASE || 'https://api.gupshup.io/wa/api/v1';
+const GUPSHUP_SM_BASE = process.env.GUPSHUP_SM_BASE || 'https://api.gupshup.io/sm/api/v1';
+
+const THE_SEASONS_BOLD = path.join(__dirname, '../fonts/Demo_Fonts/Fontspring-DEMO-theseasons-bd.otf');
+const THE_SEASONS_REGULAR = path.join(__dirname, '../fonts/Demo_Fonts/Fontspring-DEMO-theseasons-reg.otf');
+const CERT_TEMPLATE_PATH = path.join(__dirname, '../certifications/certificate.pdf');
+
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'ddmzeqpkc',
+  api_key: process.env.CLOUDINARY_API_KEY || '467773421832135',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'Iaa3QHrnAlB3O1vSBjShTbd4zuE'
+});
+
+
+function generateDocumentId(candidateName) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+  const cleanName = String(candidateName || '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+    .slice(0, 10) || 'user';
+  const randomSuffix = Math.random().toString(36).substring(2, 8);
+  const documentId = `CERT-${cleanName}-${timestamp}-${randomSuffix}`;
+  console.log(`🆔 Generated Document ID: ${documentId} for ${candidateName} by saikiran11461`);
+  return documentId;
+}
+
+function normalizeMsisdn(input) {
+  let n = String(input || '').replace(/[^0-9]/g, '');
+  if (!n.startsWith('91')) n = '91' + n;
+  if (!/^91\d{10}$/.test(n)) {
+    console.warn(`⚠️ Possibly invalid destination MSISDN: ${n}`);
+  }
+  return n;
+}
+
+async function headCheck(url) {
+  try {
+    const resp = await axios.head(url, { timeout: 10000, validateStatus: () => true });
+    return { ok: resp.status >= 200 && resp.status < 400, status: resp.status };
+  } catch (e) {
+    return { ok: false, status: 0, error: e.message };
+  }
+}
+
+async function postForm(url, fields) {
+  const form = new URLSearchParams();
+  for (const [k, v] of Object.entries(fields)) {
+    form.append(k, typeof v === 'string' ? v : JSON.stringify(v));
+  }
+  const resp = await axios.post(url, form.toString(), {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      apikey: GUPSHUP_API_KEY
+    },
+    timeout: 30000,
+    validateStatus: () => true
+  });
+  return resp;
+}
+
+
+async function generateCertificatePDF(candidateName, outputPath, documentId = null) {
+  console.log(`=== generateCertificatePDF called by saikiran11461 ===`);
+
+  if (!documentId) documentId = generateDocumentId(candidateName);
+
+  if (!fs.existsSync(CERT_TEMPLATE_PATH)) {
+    throw new Error(`Certificate template not found at: ${CERT_TEMPLATE_PATH}`);
+  }
+
+  const existingPdfBytes = fs.readFileSync(CERT_TEMPLATE_PATH);
+  const pdfDoc = await PDFDocument.load(existingPdfBytes);
+
+  pdfDoc.registerFontkit(fontkit);
+  const page = pdfDoc.getPage(0);
+
+  let customFont;
+  if (fs.existsSync(THE_SEASONS_BOLD)) {
+    console.log(`📝 Using The Seasons Bold font by saikiran11461`);
+    const fontBytes = fs.readFileSync(THE_SEASONS_BOLD);
+    customFont = await pdfDoc.embedFont(fontBytes);
+  } else if (fs.existsSync(THE_SEASONS_REGULAR)) {
+    console.log(`📝 Using The Seasons Regular font by saikiran11461`);
+    const fontBytes = fs.readFileSync(THE_SEASONS_REGULAR);
+    customFont = await pdfDoc.embedFont(fontBytes);
+  } else {
+    console.log(`📝 Using Helvetica Bold font (fallback) by saikiran11461`);
+    customFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  }
+
+  const cleanName = String(candidateName || '').trim().replace(/\s+/g, ' ') || 'Participant';
+  const textWidth = customFont.widthOfTextAtSize(cleanName, FONT_SIZE);
+
+  const { width: pageWidth, height: pageHeight } = page.getSize();
+  const x = (pageWidth - textWidth) / 2;
+  const y = pageHeight * 0.52;
+
+  page.drawText(cleanName, {
+    x,
+    y,
+    size: FONT_SIZE,
+    font: customFont,
+    color: rgb(0, 0, 0)
+  });
+
+  const pdfBytes = await pdfDoc.save();
+
+  const outputDir = path.dirname(outputPath);
+  const fileName = `${documentId}.pdf`;
+  const finalOutputPath = path.join(outputDir, fileName);
+
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(finalOutputPath, pdfBytes);
+
+  console.log(`✅ Certificate generated by saikiran11461 - Document ID: ${documentId}`);
+  return { outputPath: finalOutputPath, documentId, fileName, size: pdfBytes.length };
+}
+
+
+async function uploadToCloudinary(filePath, documentId) {
+  try {
+    console.log(`☁️ Uploading to Cloudinary: ${documentId} by saikiran11461`);
+
+    const result = await cloudinary.uploader.upload(filePath, {
+      folder: 'certificates',
+      public_id: documentId,
+      resource_type: 'raw',
+      overwrite: true,
+      invalidate: true
+    });
+
+    console.log(`✅ Cloudinary upload successful: ${result.secure_url}`);
+
+    return {
+      success: true,
+      url: result.secure_url,
+      publicId: result.public_id,
+      assetId: result.asset_id,
+      size: result.bytes,
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME || 'ddmzeqpkc'
+    };
+  } catch (error) {
+    console.error(`❌ Cloudinary upload failed:`, error?.response?.data || error.message);
+    return { success: false, error: error?.response?.data || error.message };
+  }
+}
+
+
+async function sendTemplateWithDocumentLinkWA({ destination, name, templateId, url, filename }) {
+  console.log(`📤 Gupshup WA Pattern: message.document.link, src.name=${GUPSHUP_APP_NAME}`);
+  const resp = await postForm(`${GUPSHUP_WA_BASE}/template/msg`, {
+    channel: 'whatsapp',
+    source: GUPSHUP_SOURCE,
+    destination,
+    'src.name': GUPSHUP_APP_NAME,
+    template: { id: templateId, params: [name] },
+    message: { document: { link: url, filename }, type: 'document' }
+  });
+  return resp;
+}
+
+
+async function sendTemplateWithMessageDocumentSM({ destination, name, templateId, url, filename }) {
+  console.log(`📤 Gupshup SM Fallback: message={type:document,url,filename}, src.name=${GUPSHUP_APP_NAME}`);
+  const resp = await postForm(`${GUPSHUP_SM_BASE}/template/msg`, {
+    channel: 'whatsapp',
+    source: GUPSHUP_SOURCE,
+    destination,
+    'src.name': GUPSHUP_APP_NAME,
+    template: { id: templateId, params: [name] },
+    message: { type: 'document', url, filename }
+  });
+  return resp;
+}
+
+
+async function sendTextTemplateWithLink({ destination, name, link }) {
+  if (!GUPSHUP_TEXT_TEMPLATE_ID) {
+    throw new Error('No GUPSHUP_TEXT_TEMPLATE_ID configured for text fallback');
+  }
+  console.log(`📤 Gupshup Fallback: TEXT template with link, src.name=${GUPSHUP_APP_NAME}`);
+  const resp = await postForm(`${GUPSHUP_WA_BASE}/template/msg`, {
+    channel: 'whatsapp',
+    source: GUPSHUP_SOURCE,
+    destination,
+    'src.name': GUPSHUP_APP_NAME,
+    template: { id: GUPSHUP_TEXT_TEMPLATE_ID, params: [name, link] }
+  });
+  return resp;
+}
+
+function parseGupshupResp(resp) {
+  if (resp.status >= 200 && resp.status < 300) {
+    return {
+      ok: true,
+      messageId: resp.data?.messageId || 'unknown',
+      status: resp.data?.status || 'submitted',
+      raw: resp.data
+    };
+  }
+  return {
+    ok: false,
+    code: resp.status,
+    error: typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data || {})
+  };
+}
+
+
+async function sendCertificateWithCloudinary(candidate, certificatePath, templateParams = [], documentId = null) {
+  console.log(`=== CLOUDINARY CERTIFICATE SYSTEM by saikiran11461 ===`);
+  console.log(`👤 Candidate: ${candidate?.name}, 📱 WhatsApp: ${candidate?.whatsappNumber}`);
+
+  try {
+ 
+    if (!documentId) documentId = generateDocumentId(candidate.name);
+    const certData = await generateCertificatePDF(candidate.name, certificatePath, documentId);
+    const finalCertificatePath = certData.outputPath;
+
+
+    const cloudinaryResult = await uploadToCloudinary(finalCertificatePath, documentId);
+    if (!cloudinaryResult.success) {
+      throw new Error(`Cloudinary upload failed: ${cloudinaryResult.error}`);
+    }
+
+
+    const check = await headCheck(cloudinaryResult.url);
+    if (!check.ok) {
+      throw new Error(`Cloudinary URL not reachable (status ${check.status}). URL: ${cloudinaryResult.url}`);
+    }
+
+ 
+    const destination = normalizeMsisdn(candidate.whatsappNumber);
+    const filename = `KP-Certificate-${documentId}.pdf`;
+
+    
+    let resp = await sendTemplateWithDocumentLinkWA({
+      destination,
+      name: candidate.name || 'Participant',
+      templateId: GUPSHUP_TEMPLATE_ID,
+      url: cloudinaryResult.url,
+      filename
+    });
+
+    let parsed = parseGupshupResp(resp);
+
+ 
+    if (!parsed.ok && resp.status >= 400 && resp.status < 500) {
+      console.warn('⚠️ WA pattern failed, trying SM fallback. Details:', parsed);
+      resp = await sendTemplateWithMessageDocumentSM({
+        destination,
+        name: candidate.name || 'Participant',
+        templateId: GUPSHUP_TEMPLATE_ID,
+        url: cloudinaryResult.url,
+        filename
+      });
+      parsed = parseGupshupResp(resp);
+    }
+
+  
+    if (!parsed.ok && GUPSHUP_TEXT_TEMPLATE_ID) {
+      console.warn('⚠️ Media template failed, falling back to TEXT template with link. Details:', parsed);
+      resp = await sendTextTemplateWithLink({
+        destination,
+        name: candidate.name || 'Participant',
+        link: cloudinaryResult.url
+      });
+      parsed = parseGupshupResp(resp);
+    }
+
+    if (!parsed.ok) {
+      throw new Error(`Gupshup ${parsed.code}: ${parsed.error}`);
+    }
+
+  
+    try {
+      if (fs.existsSync(finalCertificatePath)) fs.unlinkSync(finalCertificatePath);
+    } catch (cleanupErr) {
+      console.warn(`⚠️ Temp cleanup warning: ${cleanupErr.message}`);
+    }
+
+
+    return {
+      success: true,
+      message: `Certificate sent successfully to ${candidate.name}`,
+      messageId: parsed.messageId,
+      status: parsed.status,
+      method: 'template_document_link',
+      documentId,
+      candidate: {
+        id: candidate.id || candidate._id,
+        name: candidate.name,
+        email: candidate.email,
+        whatsappNumber: candidate.whatsappNumber,
+        documentId,
+        secureUrl: cloudinaryResult.url,
+        publicId: cloudinaryResult.publicId,
+        assetId: cloudinaryResult.assetId,
+        size: cloudinaryResult.size
+      },
+      cloudinary: {
+        url: cloudinaryResult.url,
+        publicId: cloudinaryResult.publicId,
+        assetId: cloudinaryResult.assetId,
+        size: cloudinaryResult.size,
+        cloudName: cloudinaryResult.cloudName
+      },
+      whatsapp: {
+        messageId: parsed.messageId,
+        status: parsed.status,
+        method: 'template_document_link'
+      },
+      processedAt: new Date().toISOString(),
+      processedBy: 'saikiran11461'
+    };
+  } catch (err) {
+    console.error(` Certificate process failed:`, err.message);
+    return {
+      success: false,
+      error: err.message,
+      documentId,
+      processedAt: new Date().toISOString(),
+      processedBy: 'saikiran11461'
+    };
+  }
+}
+
+module.exports = {
+  generateCertificatePDF,
+  sendCertificateWithCloudinary,
+  generateDocumentId
+};

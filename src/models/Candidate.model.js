@@ -15,7 +15,6 @@ const candidateSchema = new mongoose.Schema({
   whatsappNumber: { type: String, required: true },
   slot: { type: String },
 
-
   paymentStatus: {
     type: String,
     enum: ['Pending', 'Paid', 'Failed'],
@@ -36,11 +35,21 @@ const candidateSchema = new mongoose.Schema({
   },
 
   attendance: { type: Boolean, default: false },
+  attendanceDate: { type: Date },
 
   adminAttendance: { type: Boolean, default: false },
   adminAttendanceDate: { type: Date },
   attendanceToken: { type: String }, 
 
+  certificateSent: { type: Boolean, default: false },
+  certificateSentDate: { type: Date },
+  certificateSentBy: { type: String },
+
+
+  certificateDocumentId: { type: String },
+  certificateDriveFileId: { type: String },
+  certificateDriveViewLink: { type: String },
+  certificateFileName: { type: String },
 
   paymentUpdatedBy: { type: String, enum: ['manual', 'webhook'], default: 'manual' },
   razorpayPaymentData: { type: mongoose.Schema.Types.Mixed },
@@ -48,4 +57,4 @@ const candidateSchema = new mongoose.Schema({
 
 const Candidate = mongoose.model('Candidate', candidateSchema);
 
-module.exports =  Candidate
+module.exports = Candidate;
