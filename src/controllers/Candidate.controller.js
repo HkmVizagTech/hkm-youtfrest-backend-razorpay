@@ -3,18 +3,15 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const sendWhatsappGupshup = require('../utils/sendWhatsappGupshup');
 const { 
- sendCertificateWithCloudinary, generateDocumentId, generateCertificatePDF, testCloudinaryConnection, testWhatsAppConnection
+  sendCertificateWithCloudinary, generateDocumentId, generateCertificatePDF, testCloudinaryConnection, testWhatsAppConnection
 } = require('../utils/sendCertificateWithTemplate');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 const gupshup = require('@api/gupshup');
 
-
-
 const tempDir = path.join(__dirname, '../temp/certificates');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -22,14 +19,10 @@ const razorpay = new Razorpay({
 });
 
 const CandidateController = {
-
-<<<<<<< HEAD
-=======
   createOrder: async (req, res) => {
     const { amount, formData } = req.body;  
     const receipt = `receipt_${Date.now()}`;
     const options = { amount, currency: "INR", receipt };
-
     try {
       const order = await razorpay.orders.create(options);
       const normalizedNumber = "91" + formData.whatsappNumber;
@@ -88,7 +81,6 @@ const CandidateController = {
       candidate.paymentUpdatedBy = "manual";
       await candidate.save();
 
-     
       if (!candidate.whatsappNumber) {
         console.error("Cannot send WhatsApp: candidate.whatsappNumber is missing for", candidate._id);
       } else {
@@ -134,13 +126,11 @@ const CandidateController = {
           candidate.paymentUpdatedBy = "webhook";
           await candidate.save();
 
-         
           if (!candidate.whatsappNumber) {
             console.error("Cannot send WhatsApp: candidate.whatsappNumber is missing for", candidate._id);
           } else {
             await sendWhatsappGupshup(candidate);
           }
-         // console.log('Payment updated via webhook for candidate:', candidate._id);
         }
         return res.json({ status: "ok" });
       } catch (err) {
@@ -151,7 +141,6 @@ const CandidateController = {
     return res.json({ status: "ignored" });
   },
 
->>>>>>> 8d680ee1865c155ef684bca138c2a0dd2b825071
   createCandidate: async (req, res) => {
     try {
       const candidateData = {
@@ -159,12 +148,9 @@ const CandidateController = {
         registrationDate: new Date(),
         lastUpdated: new Date()
       };
-      
       const candidate = new Candidate(candidateData);
       await candidate.save();
-      
       console.log(` New candidate created: ${candidate.name} (${candidate.email})`);
-      
       res.status(201).json({
         status: 'success',
         message: 'Candidate created successfully',
@@ -179,22 +165,17 @@ const CandidateController = {
     }
   },
 
-  // Get all candidates
   getAllCandidates: async (req, res) => {
     try {
       const { page = 1, limit = 50, status, paymentStatus } = req.query;
-      
       let query = {};
       if (status) query.status = status;
       if (paymentStatus) query.paymentStatus = paymentStatus;
-
       const candidates = await Candidate.find(query)
         .limit(limit * 1)
         .skip((page - 1) * limit)
         .sort({ registrationDate: -1 });
-
       const total = await Candidate.countDocuments(query);
-
       res.json({
         status: 'success',
         candidates,
@@ -215,18 +196,15 @@ const CandidateController = {
     }
   },
 
-  // Get candidate by ID
   getCandidateById: async (req, res) => {
     try {
       const candidate = await Candidate.findById(req.params.id);
-      
       if (!candidate) {
         return res.status(404).json({
           status: 'error',
           message: 'Candidate not found'
         });
       }
-
       res.json({
         status: 'success',
         candidate
@@ -240,7 +218,6 @@ const CandidateController = {
     }
   },
 
-
   updateCandidate: async (req, res) => {
     try {
       const updates = {
@@ -248,22 +225,18 @@ const CandidateController = {
         lastUpdated: new Date(),
         updatedBy: 'saikiran11461'
       };
-
       const candidate = await Candidate.findByIdAndUpdate(
         req.params.id,
         updates,
         { new: true, runValidators: true }
       );
-
       if (!candidate) {
         return res.status(404).json({
           status: 'error',
           message: 'Candidate not found'
         });
       }
-
       console.log(` Candidate updated: ${candidate.name} by saikiran11461`);
-
       res.json({
         status: 'success',
         message: 'Candidate updated successfully',
@@ -278,21 +251,16 @@ const CandidateController = {
     }
   },
 
-
   deleteCandidate: async (req, res) => {
     try {
       const candidate = await Candidate.findByIdAndDelete(req.params.id);
-
       if (!candidate) {
         return res.status(404).json({
           status: 'error',
           message: 'Candidate not found'
         });
       }
-
       console.log(` Candidate deleted: ${candidate.name} by saikiran11461`);
-
-<<<<<<< HEAD
       res.json({
         status: 'success',
         message: 'Candidate deleted successfully'
@@ -302,7 +270,37 @@ const CandidateController = {
       res.status(500).json({
         status: 'error',
         message: error.message
-=======
+      });
+    }
+  },
+
+  deleteByName: async (req, res) => {
+    try {
+      const { name } = req.body;
+      if (!name) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Name is required'
+        });
+      }
+      const result = await Candidate.deleteMany({ 
+        name: { $regex: new RegExp(name, 'i') } 
+      });
+      console.log(` Deleted ${result.deletedCount} candidates with name: ${name} by saikiran11461`);
+      res.json({
+        status: 'success',
+        message: `Deleted ${result.deletedCount} candidates`,
+        deletedCount: result.deletedCount
+      });
+    } catch (error) {
+      console.error(' Error deleting candidates by name:', error);
+      res.status(500).json({
+        status: 'error',
+        message: error.message
+      });
+    }
+  },
+        
 
 markAttendance: async (req, res) => {
   const { whatsappNumber } = req.body;
@@ -364,8 +362,8 @@ markAttendance: async (req, res) => {
 },
 
 adminAttendanceScan: async (req, res) => {
-  const { token } = req.body;
   try {
+    const { token } = req.body;
     const candidate = await Candidate.findOne({ attendanceToken: token });
     if (!candidate) {
       return res.status(404).json({ message: "Candidate not found" });
@@ -374,7 +372,6 @@ adminAttendanceScan: async (req, res) => {
       return res.status(400).json({ message: "Candidate did not mark attendance" });
     }
     if (candidate.adminAttendance) {
-     
       return res.status(200).json({
         status: "already-marked",
         message: "Admin already marked attendance",
@@ -385,368 +382,337 @@ adminAttendanceScan: async (req, res) => {
         gender: candidate.gender,
         college: candidate.college,
         branch: candidate.branch,
->>>>>>> 8d680ee1865c155ef684bca138c2a0dd2b825071
       });
     }
-  },
 
+    candidate.adminAttendance = true;
+    candidate.adminAttendanceDate = new Date();
+    await candidate.save();
 
-  deleteByName: async (req, res) => {
-    try {
-      const { name } = req.body;
-      
-      if (!name) {
+    res.json({
+      status: "success",
+      message: "Admin attendance marked successfully",
+      name: candidate.name,
+      email: candidate.email,
+      phone: candidate.phone,
+      city: candidate.city,
+      gender: candidate.gender,
+      college: candidate.college,
+      branch: candidate.branch
+    });
+  } catch (error) {
+    console.error("Error in admin attendance scan:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+},
+
+deleteByName: async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Name is required'
+      });
+    }
+    const result = await Candidate.deleteMany({
+      name: { $regex: new RegExp(name, 'i') }
+    });
+    console.log(` Deleted ${result.deletedCount} candidates with name: ${name} by saikiran11461`);
+    res.json({
+      status: 'success',
+      message: `Deleted ${result.deletedCount} candidates`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error(' Error deleting candidates by name:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
+
+createOrder: async (req, res) => {
+  try {
+    const { amount, candidateId } = req.body;
+    const candidate = await Candidate.findById(candidateId);
+    if (!candidate) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Candidate not found'
+      });
+    }
+    const options = {
+      amount: amount * 100,
+      currency: 'INR',
+      receipt: `receipt_${candidateId}_${Date.now()}`,
+      notes: {
+        candidateId: candidateId,
+        candidateName: candidate.name,
+        candidateEmail: candidate.email
+      }
+    };
+    const order = await razorpay.orders.create(options);
+    await Candidate.findByIdAndUpdate(candidateId, {
+      razorpayOrderId: order.id,
+      orderAmount: amount,
+      orderDate: new Date(),
+      paymentStatus: 'Pending'
+    });
+    console.log(`💳 Order created for ${candidate.name}: ${order.id}`);
+    res.json({
+      status: 'success',
+      order,
+      key: process.env.RAZORPAY_KEY_ID
+    });
+  } catch (error) {
+    console.error(' Error creating order:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
+
+verifyPayment: async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(body.toString())
+      .digest("hex");
+    if (expectedSignature === razorpay_signature) {
+      const candidate = await Candidate.findOneAndUpdate(
+        { razorpayOrderId: razorpay_order_id },
+        {
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature,
+          paymentStatus: 'Paid',
+          paymentDate: new Date(),
+          verifiedBy: 'saikiran11461'
+        },
+        { new: true }
+      );
+      if (!candidate) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Candidate not found for this order'
+        });
+      }
+      console.log(` Payment verified for ${candidate.name}: ${razorpay_payment_id}`);
+      try {
+        await sendWhatsappGupshup(candidate);
+        console.log(` WhatsApp sent to ${candidate.name}`);
+      } catch (whatsappError) {
+        console.error(' WhatsApp sending failed:', whatsappError);
+      }
+      res.json({
+        status: 'success',
+        message: 'Payment verified successfully',
+        candidate
+      });
+    } else {
+      res.status(400).json({
+        status: 'error',
+        message: 'Payment verification failed'
+      });
+    }
+  } catch (error) {
+    console.error(' Error verifying payment:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
+
+verifyPaymentId: async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id);
+    if (!candidate) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Candidate not found'
+      });
+    }
+    res.json({
+      status: 'success',
+      candidate: {
+        name: candidate.name,
+        email: candidate.email,
+        paymentStatus: candidate.paymentStatus,
+        razorpayOrderId: candidate.razorpayOrderId,
+        razorpayPaymentId: candidate.razorpayPaymentId,
+        paymentDate: candidate.paymentDate
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching payment verification:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
+
+webhook: async (req, res) => {
+  try {
+    const webhookSignature = req.headers['x-razorpay-signature'];
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const expectedSignature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+      if (expectedSignature !== webhookSignature) {
         return res.status(400).json({
           status: 'error',
-          message: 'Name is required'
+          message: 'Webhook signature verification failed'
         });
       }
-
-      const result = await Candidate.deleteMany({ 
-        name: { $regex: new RegExp(name, 'i') } 
-      });
-
-      console.log(` Deleted ${result.deletedCount} candidates with name: ${name} by saikiran11461`);
-
-      res.json({
-        status: 'success',
-        message: `Deleted ${result.deletedCount} candidates`,
-        deletedCount: result.deletedCount
-      });
-    } catch (error) {
-      console.error(' Error deleting candidates by name:', error);
-      res.status(500).json({
-        status: 'error',
-        message: error.message
-      });
     }
-  },
-
-
-  createOrder: async (req, res) => {
-    try {
-      const { amount, candidateId } = req.body;
-
-      const candidate = await Candidate.findById(candidateId);
-      if (!candidate) {
-        return res.status(404).json({
-          status: 'error',
-          message: 'Candidate not found'
-        });
-      }
-
-      const options = {
-        amount: amount * 100, 
-        currency: 'INR',
-        receipt: `receipt_${candidateId}_${Date.now()}`,
-        notes: {
-          candidateId: candidateId,
-          candidateName: candidate.name,
-          candidateEmail: candidate.email
-        }
-      };
-
-      const order = await razorpay.orders.create(options);
-
-  
-      await Candidate.findByIdAndUpdate(candidateId, {
-        razorpayOrderId: order.id,
-        orderAmount: amount,
-        orderDate: new Date(),
-        paymentStatus: 'Pending'
-      });
-
-      console.log(`💳 Order created for ${candidate.name}: ${order.id}`);
-
-      res.json({
-        status: 'success',
-        order,
-        key: process.env.RAZORPAY_KEY_ID
-      });
-    } catch (error) {
-      console.error(' Error creating order:', error);
-      res.status(500).json({
-        status: 'error',
-        message: error.message
-      });
-    }
-<<<<<<< HEAD
-  },
-
-
-  verifyPayment: async (req, res) => {
-    try {
-      const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-
-      const body = razorpay_order_id + "|" + razorpay_payment_id;
-      const expectedSignature = crypto
-        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-        .update(body.toString())
-        .digest("hex");
-
-      if (expectedSignature === razorpay_signature) {
-
-        const candidate = await Candidate.findOneAndUpdate(
-          { razorpayOrderId: razorpay_order_id },
-          {
-            razorpayPaymentId: razorpay_payment_id,
-            razorpaySignature: razorpay_signature,
-            paymentStatus: 'Paid',
-            paymentDate: new Date(),
-            verifiedBy: 'saikiran11461'
-          },
-          { new: true }
-        );
-
-        if (!candidate) {
-          return res.status(404).json({
-            status: 'error',
-            message: 'Candidate not found for this order'
-          });
-        }
-
-        console.log(` Payment verified for ${candidate.name}: ${razorpay_payment_id}`);
-
-
-        try {
-          await sendWhatsappGupshup(candidate);
-          console.log(` WhatsApp sent to ${candidate.name}`);
-        } catch (whatsappError) {
-          console.error(' WhatsApp sending failed:', whatsappError);
-        }
-
-        res.json({
-          status: 'success',
-          message: 'Payment verified successfully',
-          candidate
-        });
-      } else {
-        res.status(400).json({
-          status: 'error',
-          message: 'Payment verification failed'
-        });
-      }
-    } catch (error) {
-      console.error(' Error verifying payment:', error);
-      res.status(500).json({
-        status: 'error',
-        message: error.message
-      });
-    }
-  },
-
-
-  verifyPaymentId: async (req, res) => {
-    try {
-      const candidate = await Candidate.findById(req.params.id);
-      
-      if (!candidate) {
-        return res.status(404).json({
-          status: 'error',
-          message: 'Candidate not found'
-        });
-      }
-
-      res.json({
-        status: 'success',
-        candidate: {
-          name: candidate.name,
-          email: candidate.email,
-          paymentStatus: candidate.paymentStatus,
-          razorpayOrderId: candidate.razorpayOrderId,
-          razorpayPaymentId: candidate.razorpayPaymentId,
-          paymentDate: candidate.paymentDate
-        }
-      });
-    } catch (error) {
-      console.error('Error fetching payment verification:', error);
-      res.status(500).json({
-        status: 'error',
-        message: error.message
-      });
-    }
-  },
-
-
-  webhook: async (req, res) => {
-    try {
-      const webhookSignature = req.headers['x-razorpay-signature'];
-      const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-
-      if (webhookSecret) {
-        const expectedSignature = crypto
-          .createHmac('sha256', webhookSecret)
-          .update(JSON.stringify(req.body))
-          .digest('hex');
-
-        if (expectedSignature !== webhookSignature) {
-          return res.status(400).json({
-            status: 'error',
-            message: 'Webhook signature verification failed'
-          });
-        }
-      }
-
-      const event = req.body.event;
-      const paymentEntity = req.body.payload.payment.entity;
-
-      console.log(` Webhook received: ${event}`);
-
-      if (event === 'payment.captured') {
-        const candidate = await Candidate.findOneAndUpdate(
-          { razorpayOrderId: paymentEntity.order_id },
-          {
-            paymentStatus: 'Paid',
-            paymentDate: new Date(),
-            webhookProcessed: true,
-            webhookProcessedAt: new Date(),
-            processedBy: 'webhook_saikiran11461'
-          },
-          { new: true }
-        );
-
-        if (candidate) {
-          console.log(` Webhook processed for ${candidate.name}`);
-        }
-      }
-
-      res.status(200).json({ status: 'ok' });
-    } catch (error) {
-      console.error(' Webhook error:', error);
-      res.status(500).json({
-        status: 'error',
-        message: error.message
-      });
-    }
-  },
-
-  markAttendance: async (req, res) => {
-    try {
-      const { candidateId } = req.body;
-
-      const candidate = await Candidate.findByIdAndUpdate(
-        candidateId,
+    const event = req.body.event;
+    const paymentEntity = req.body.payload.payment.entity;
+    console.log(` Webhook received: ${event}`);
+    if (event === 'payment.captured') {
+      const candidate = await Candidate.findOneAndUpdate(
+        { razorpayOrderId: paymentEntity.order_id },
         {
-          attendance: true,
-          attendanceDate: new Date(),
-          attendanceMarkedBy: 'saikiran11461'
+          paymentStatus: 'Paid',
+          paymentDate: new Date(),
+          webhookProcessed: true,
+          webhookProcessedAt: new Date(),
+          processedBy: 'webhook_saikiran11461'
         },
         { new: true }
       );
-
-      if (!candidate) {
-        return res.status(404).json({
-          status: 'error',
-          message: 'Candidate not found'
-        });
+      if (candidate) {
+        console.log(` Webhook processed for ${candidate.name}`);
       }
+    }
+    res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    console.error(' Webhook error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
 
-      console.log(` Attendance marked for ${candidate.name} by saikiran11461`);
-
-      res.json({
-        status: 'success',
-        message: 'Attendance marked successfully',
-        candidate
-      });
-    } catch (error) {
-      console.error(' Error marking attendance:', error);
-      res.status(500).json({
+markAttendance: async (req, res) => {
+  try {
+    const { candidateId } = req.body;
+    const candidate = await Candidate.findByIdAndUpdate(
+      candidateId,
+      {
+        attendance: true,
+        attendanceDate: new Date(),
+        attendanceMarkedBy: 'saikiran11461'
+      },
+      { new: true }
+    );
+    if (!candidate) {
+      return res.status(404).json({
         status: 'error',
-        message: error.message
+        message: 'Candidate not found'
       });
     }
-  },
+    console.log(` Attendance marked for ${candidate.name} by saikiran11461`);
+    res.json({
+      status: 'success',
+      message: 'Attendance marked successfully',
+      candidate
+    });
+  } catch (error) {
+    console.error(' Error marking attendance:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
 
-
-  adminAttendanceScan: async (req, res) => {
+adminAttendanceScan: async (req, res) => {
+  try {
+    const { qrData } = req.body;
+    let candidateId;
     try {
-      const { qrData } = req.body;
-
-    
-      let candidateId;
-      try {
-        const qrJson = JSON.parse(qrData);
-        candidateId = qrJson.candidateId || qrJson.id;
-      } catch {
-        candidateId = qrData; 
-      }
-
-      const candidate = await Candidate.findByIdAndUpdate(
-        candidateId,
-        {
-          attendance: true,
-          attendanceDate: new Date(),
-          attendanceMarkedBy: 'admin_scan_saikiran11461',
-          qrScanned: true,
-          qrScannedAt: new Date()
-        },
-        { new: true }
-      );
-
-      if (!candidate) {
-        return res.status(404).json({
-          status: 'error',
-          message: 'Candidate not found'
-        });
-      }
-
-      console.log(` QR scanned attendance for ${candidate.name} by saikiran11461`);
-
-      res.json({
-        status: 'success',
-        message: 'Attendance marked via QR scan',
-        candidate
-      });
-    } catch (error) {
-      console.error(' Error in admin attendance scan:', error);
-      res.status(500).json({
+      const qrJson = JSON.parse(qrData);
+      candidateId = qrJson.candidateId || qrJson.id;
+    } catch {
+      candidateId = qrData;
+    }
+    const candidate = await Candidate.findByIdAndUpdate(
+      candidateId,
+      {
+        attendance: true,
+        attendanceDate: new Date(),
+        attendanceMarkedBy: 'admin_scan_saikiran11461',
+        qrScanned: true,
+        qrScannedAt: new Date()
+      },
+      { new: true }
+    );
+    if (!candidate) {
+      return res.status(404).json({
         status: 'error',
-        message: error.message
+        message: 'Candidate not found'
       });
     }
-  },
+    console.log(` QR scanned attendance for ${candidate.name} by saikiran11461`);
+    res.json({
+      status: 'success',
+      message: 'Attendance marked via QR scan',
+      candidate
+    });
+  } catch (error) {
+    console.error(' Error in admin attendance scan:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
 
-
-  attendanceList: async (req, res) => {
-    try {
-      const { date, status } = req.query;
-      
-      let query = {};
-      if (status === 'present') query.attendance = true;
-      if (status === 'absent') query.attendance = { $ne: true };
-      
-      if (date) {
-        const startOfDay = new Date(date);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(date);
-        endOfDay.setHours(23, 59, 59, 999);
-        
-        query.attendanceDate = { $gte: startOfDay, $lte: endOfDay };
-      }
-
-      const candidates = await Candidate.find(query)
-        .select('name email whatsappNumber college course attendance attendanceDate')
-        .sort({ attendanceDate: -1 });
-
-      const summary = {
-        total: candidates.length,
-        present: candidates.filter(c => c.attendance).length,
-        absent: candidates.filter(c => !c.attendance).length
-      };
-
-      res.json({
-        status: 'success',
-        summary,
-        candidates
-      });
-    } catch (error) {
-      console.error('Error fetching attendance list:', error);
-      res.status(500).json({
-        status: 'error',
-        message: error.message
-      });
+attendanceList: async (req, res) => {
+  try {
+    const { date, status } = req.query;
+    let query = {};
+    if (status === 'present') query.attendance = true;
+    if (status === 'absent') query.attendance = { $ne: true };
+    if (date) {
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      query.attendanceDate = { $gte: startOfDay, $lte: endOfDay };
     }
-  },
+    const candidates = await Candidate.find(query)
+      .select('name email whatsappNumber college course attendance attendanceDate')
+      .sort({ attendanceDate: -1 });
+    const summary = {
+      total: candidates.length,
+      present: candidates.filter(c => c.attendance).length,
+      absent: candidates.filter(c => !c.attendance).length
+    };
+    res.json({
+      status: 'success',
+      summary,
+      candidates
+    });
+  } catch (error) {
+    console.error('Error fetching attendance list:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+},
+
+
 
   
   adminScannedList: async (req, res) => {
@@ -1462,75 +1428,63 @@ adminAttendanceScan: async (req, res) => {
     }
   },
 
-  getCertificateSystemHealth: async (req, res) => {
-    try {
-      console.log(`🏥 Certificate system health check by saikiran11461 at 2025-08-24 18:19:32 UTC`);
-      
-      const cloudinaryTest = await testCloudinaryConnection();
-      const whatsappTest = await testWhatsAppConnection();
-      
-  
-      const dbCheck = await Candidate.countDocuments().limit(1);
-      const dbHealthy = dbCheck >= 0;
-      
-      const tempDirExists = fs.existsSync(tempDir);
-      
-      const overallHealth = cloudinaryTest.success && whatsappTest.success && dbHealthy && tempDirExists;
-      
-      res.json({
-        status: "success",
-        health: {
-          overall: overallHealth ? 'healthy' : 'degraded',
-          cloudinary: cloudinaryTest.success ? 'healthy' : 'unhealthy',
-          whatsapp: whatsappTest.success ? 'healthy' : 'unhealthy',
-          database: dbHealthy ? 'healthy' : 'unhealthy',
-          tempDirectory: tempDirExists ? 'healthy' : 'unhealthy'
-        },
-        details: {
-          cloudinary: cloudinaryTest,
-          whatsapp: whatsappTest,
-          database: { connected: dbHealthy },
-          tempDirectory: { 
-            exists: tempDirExists, 
-            path: tempDir 
-          }
-        },
-        configuration: {
-          cloudName: 'ddmzeqpkc',
-          certificateFolder: 'certificates',
-          storageMethod: 'cloudinary'
-        },
-        checkedAt: new Date().toISOString(),
-        checkedBy: 'saikiran11461',
-        serverTime: new Date().toISOString(),
-        apiVersion: "2.0.0"
-      });
-    } catch (error) {
-      console.error(' Certificate system health check failed by saikiran11461:', error);
-      res.status(500).json({
-        status: "error",
-        message: error.message,
-        health: {
-          overall: 'unhealthy'
-        },
-        timestamp: new Date().toISOString(),
-        checkedBy: 'saikiran11461',
-        apiVersion: "2.0.0"
-      });
-    }
-  },
+getCertificateSystemHealth: async (req, res) => {
+  try {
+    console.log(`🏥 Certificate system health check by saikiran11461 at 2025-08-24 18:19:32 UTC`);
 
-=======
-    return res.status(200).json({
-      success: true,
-      message: "Payment verified",
-      candidate,
+    const cloudinaryTest = await testCloudinaryConnection();
+    const whatsappTest = await testWhatsAppConnection();
+
+    const dbCheck = await Candidate.countDocuments().limit(1);
+    const dbHealthy = dbCheck >= 0;
+
+    const tempDirExists = fs.existsSync(tempDir);
+
+    const overallHealth = cloudinaryTest.success && whatsappTest.success && dbHealthy && tempDirExists;
+
+    res.json({
+      status: "success",
+      health: {
+        overall: overallHealth ? 'healthy' : 'degraded',
+        cloudinary: cloudinaryTest.success ? 'healthy' : 'unhealthy',
+        whatsapp: whatsappTest.success ? 'healthy' : 'unhealthy',
+        database: dbHealthy ? 'healthy' : 'unhealthy',
+        tempDirectory: tempDirExists ? 'healthy' : 'unhealthy'
+      },
+      details: {
+        cloudinary: cloudinaryTest,
+        whatsapp: whatsappTest,
+        database: { connected: dbHealthy },
+        tempDirectory: {
+          exists: tempDirExists,
+          path: tempDir
+        }
+      },
+      configuration: {
+        cloudName: 'ddmzeqpkc',
+        certificateFolder: 'certificates',
+        storageMethod: 'cloudinary'
+      },
+      checkedAt: new Date().toISOString(),
+      checkedBy: 'saikiran11461',
+      serverTime: new Date().toISOString(),
+      apiVersion: "2.0.0"
     });
-  } catch (err) {
-    console.error("Payment fetch failed:", err.message);
-    return res.status(500).json({ success: false, message: "Error verifying payment ID" });
+  } catch (error) {
+    console.error(' Certificate system health check failed by saikiran11461:', error);
+    res.status(500).json({
+      status: "error",
+      message: error.message,
+      health: {
+        overall: 'unhealthy'
+      },
+      timestamp: new Date().toISOString(),
+      checkedBy: 'saikiran11461',
+      apiVersion: "2.0.0"
+    });
   }
 },
+
 sendTemplate: async (req, res) => {
   try {
     const users = await Candidate.find({
@@ -1538,13 +1492,11 @@ sendTemplate: async (req, res) => {
       slot: "Evening"
     });
 
-    // WhatsApp number validation
     const isValidWhatsAppNumber = (number) => {
       const cleaned = (number || "").replace(/\D/g, "");
       return /^91\d{10}$/.test(cleaned);
     };
 
-    // Filter valid numbers
     const validUsers = users.filter(user =>
       isValidWhatsAppNumber(user.whatsappNumber)
     );
@@ -1553,20 +1505,17 @@ sendTemplate: async (req, res) => {
     console.log("Valid numbers:", validUsers.length);
 
     const templateId = "ce707c05-54ef-4e80-b0fd-c0f9885288f6";
-    // const templateParams = ["11 AM", "10 AM","Lunch Feast"]; // adjust as per your template
 
     let results = [];
-    let count=0;
+    let count = 0;
     for (const user of validUsers) {
       count++;
-      // if(count===3){
-      //   break;
-      // }
-      const normalizedNumber = user.whatsappNumber.replace(/\D/g, ""); // remove non-digits
+
+      const normalizedNumber = user.whatsappNumber.replace(/\D/g, "");
       try {
         const message = await gupshup.sendingTextTemplate(
           {
-            template: { id: templateId, params: [user.name,"4 PM"] },
+            template: { id: templateId, params: [user.name, "4 PM"] },
             'src.name': 'Production',
             destination: normalizedNumber,
             source: '917075176108',
@@ -1574,7 +1523,6 @@ sendTemplate: async (req, res) => {
           { apikey: 'REDACTED_ROTATE_THIS_KEY' }
         );
         console.log(message.data);
-        // console.log(message.err)
         results.push({ user: user.name, number: normalizedNumber, status: "sent", response: message.data });
       } catch (err) {
         console.error(`Failed for ${user.name} (${normalizedNumber}):`, err.message);
@@ -1593,9 +1541,7 @@ sendTemplate: async (req, res) => {
     return res.status(500).json({ status: "error", message: err.message });
   }
 }
->>>>>>> 8d680ee1865c155ef684bca138c2a0dd2b825071
-
-
+  
 };
 
 
