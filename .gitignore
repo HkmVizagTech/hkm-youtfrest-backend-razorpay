@@ -1,2 +1,18 @@
+# dependencies
+node_modules/
+
+# env & secrets
 .env
-/node_modules
+.env.local
+*.env
+
+# OS files
+.DS_Store
+**/.DS_Store
+
+# runtime / generated certificates (PII - do not commit)
+src/temp/
+src/temp/**
+
+# logs
+*.log
