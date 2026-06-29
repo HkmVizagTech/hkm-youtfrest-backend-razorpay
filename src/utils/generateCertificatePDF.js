@@ -4,7 +4,7 @@ const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const axios = require('axios');
 const FormData = require('form-data');
 
-const GUPSHUP_API_KEY = 'REDACTED_ROTATE_THIS_KEY';
+const GUPSHUP_API_KEY = process.env.GUPSHUP_API_KEY;
 const GUPSHUP_SOURCE = '917075176108';
 
 async function generateCertificatePDF(candidateName, outputPath) {

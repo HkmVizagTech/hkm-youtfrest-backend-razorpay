@@ -20,7 +20,7 @@ async function testDifferentTemplate() {
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'apikey': 'REDACTED_ROTATE_THIS_KEY'
+          'apikey': process.env.GUPSHUP_API_KEY
         }
       }
     );
@@ -33,7 +33,7 @@ async function testDifferentTemplate() {
         'https://api.gupshup.io/sm/api/v1/settings/webhooks',
         {
           headers: {
-            'apikey': 'REDACTED_ROTATE_THIS_KEY'
+            'apikey': process.env.GUPSHUP_API_KEY
           }
         }
       );

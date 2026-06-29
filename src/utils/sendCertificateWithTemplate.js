@@ -11,7 +11,7 @@ const { v2: cloudinary } = require('cloudinary');
 
 const FONT_SIZE = 36;
 
-const GUPSHUP_API_KEY = process.env.GUPSHUP_API_KEY || 'REDACTED_ROTATE_THIS_KEY';
+const GUPSHUP_API_KEY = process.env.GUPSHUP_API_KEY || process.env.GUPSHUP_API_KEY;
 const GUPSHUP_SOURCE = process.env.GUPSHUP_SOURCE || '917075176108';
 
 const GUPSHUP_APP_NAME = process.env.GUPSHUP_APP_NAME || '4KoeJVChI420QyWVhAW1kE7L';

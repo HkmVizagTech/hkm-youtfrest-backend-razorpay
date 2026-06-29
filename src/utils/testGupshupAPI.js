@@ -20,7 +20,7 @@ async function simpleWhatsAppTest() {
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'apikey': 'REDACTED_ROTATE_THIS_KEY'
+          'apikey': process.env.GUPSHUP_API_KEY
         }
       }
     );

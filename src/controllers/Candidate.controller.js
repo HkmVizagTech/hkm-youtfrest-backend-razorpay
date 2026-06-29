@@ -1520,7 +1520,7 @@ sendTemplate: async (req, res) => {
             destination: normalizedNumber,
             source: '917075176108',
           },
-          { apikey: 'REDACTED_ROTATE_THIS_KEY' }
+          { apikey: process.env.GUPSHUP_API_KEY }
         );
         console.log(message.data);
         results.push({ user: user.name, number: normalizedNumber, status: "sent", response: message.data });
