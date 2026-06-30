@@ -60,19 +60,16 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server listening on port ${PORT}`);
 });
 
-// Connect to MongoDB separately. Retry instead of exiting, so a slow or
-// briefly-unavailable database doesn't take the whole service down.
+// Connect to MongoDB separately, retrying indefinitely with a capped interval.
+// This way the service connects automatically as soon as the database becomes
+// reachable (e.g. after fixing the Atlas IP allowlist) — no restart required.
 const connectWithRetry = async (attempt = 1) => {
   try {
     await Connection();
     console.log('✅ MongoDB connected');
   } catch (err) {
     console.error(`❌ DB connection failed (attempt ${attempt}):`, err.message);
-    if (attempt < 10) {
-      setTimeout(() => connectWithRetry(attempt + 1), 5000);
-    } else {
-      console.error('❌ Giving up on DB connection after 10 attempts');
-    }
+    setTimeout(() => connectWithRetry(attempt + 1), 5000);
   }
 };
 connectWithRetry();
