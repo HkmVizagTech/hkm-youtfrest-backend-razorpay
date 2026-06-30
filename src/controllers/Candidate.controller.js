@@ -8,8 +8,6 @@ const {
   sendCertificateWithCloudinary,
   generateDocumentId,
   generateCertificatePDF,
-  testCloudinaryConnection,
-  testWhatsAppConnection,
 } = require('../utils/sendCertificateWithTemplate');
 require('dotenv').config();
 
@@ -452,19 +450,72 @@ const CandidateController = {
   // ── Certificate: system health ─────────────────────────────────────────────
   getCertificateSystemHealth: async (req, res) => {
     try {
-      const [cloudinary, whatsapp] = await Promise.all([testCloudinaryConnection(), testWhatsAppConnection()]);
       const tempOk = fs.existsSync(tempDir);
+      const cloudinaryOk = !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+      const whatsappOk = !!(process.env.GUPSHUP_API_KEY || process.env.FLAXXA_WAPI_TOKEN);
       res.json({
         status: 'success',
         health: {
-          overall: cloudinary.success && whatsapp.success && tempOk ? 'healthy' : 'degraded',
-          cloudinary: cloudinary.success ? 'healthy' : 'unhealthy',
-          whatsapp: whatsapp.success ? 'healthy' : 'unhealthy',
+          overall: cloudinaryOk && tempOk ? 'healthy' : 'degraded',
+          cloudinary: cloudinaryOk ? 'configured' : 'missing-config',
+          whatsapp: whatsappOk ? 'configured' : 'missing-config',
           tempDirectory: tempOk ? 'healthy' : 'unhealthy',
         },
       });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Certificate: fetch by document ID ──────────────────────────────────────
+  getCertificateByDocumentId: async (req, res) => {
+    try {
+      const candidate = await Candidate.findOne({ certificateDocumentId: req.params.documentId });
+      if (!candidate) return res.status(404).json({ status: 'error', message: 'Certificate not found' });
+      res.json({
+        status: 'success',
+        certificate: {
+          documentId: req.params.documentId,
+          name: candidate.name,
+          email: candidate.email,
+          college: candidate.college,
+          sentDate: candidate.certificateSentDate,
+          viewLink: candidate.certificateDriveViewLink,
+          fileName: candidate.certificateFileName,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Certificate: generate only (no send) ───────────────────────────────────
+  generateSingleCertificateOnly: async (req, res) => {
+    try {
+      const { candidateId } = req.body;
+      const candidate = await Candidate.findById(candidateId);
+      if (!candidate) return res.status(404).json({ status: 'error', message: 'Candidate not found' });
+      if (!candidate.attendance || candidate.paymentStatus !== 'Paid')
+        return res.status(400).json({ status: 'error', message: 'Candidate not eligible' });
+
+      const documentId = generateDocumentId(candidate.name);
+      const outputPath = path.join(tempDir, `${documentId}.pdf`);
+      const certData = await generateCertificatePDF(candidate.name, outputPath, documentId);
+
+      res.json({ status: 'success', documentId, path: certData.outputPath, name: candidate.name });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Admin: manually create a candidate ─────────────────────────────────────
+  createCandidate: async (req, res) => {
+    try {
+      const candidate = new Candidate({ ...req.body, registrationDate: new Date() });
+      await candidate.save();
+      res.status(201).json({ status: 'success', message: 'Candidate created successfully', candidate });
+    } catch (err) {
+      res.status(400).json({ status: 'error', message: err.message });
     }
   },
 

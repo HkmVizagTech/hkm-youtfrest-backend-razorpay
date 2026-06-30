@@ -1,0 +1,15 @@
+# Railway (Nixpacks) build configuration for Krishna Pulse backend.
+# The apt packages below let the optional `canvas` dependency build.
+# If canvas still fails, it is optional — the app deploys and runs without it.
+[phases.setup]
+aptPkgs = [
+  "build-essential",
+  "pkg-config",
+  "python3",
+  "libcairo2-dev",
+  "libpango1.0-dev",
+  "libjpeg-dev",
+  "libgif-dev",
+  "librsvg2-dev",
+  "libpixman-1-dev"
+]
