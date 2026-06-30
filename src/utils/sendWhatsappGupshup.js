@@ -183,8 +183,16 @@ async function sendWhatsappGupshup(candidate, templateParams = [candidate.name],
          
             try {
               console.log('🔄 Method 4: Ultra-compressed JPEG...');
-              
-              const Canvas = require('canvas');
+
+              // `canvas` is an optional, heavy native dependency and is no longer
+              // installed by default. If it's absent, skip this fallback gracefully
+              // (Methods 1–3 above already handle delivery).
+              let Canvas;
+              try {
+                Canvas = require('canvas');
+              } catch (e) {
+                throw new Error('canvas not installed; skipping ultra-compress fallback');
+              }
               
       
               const image = await Canvas.loadImage(mediaPath);

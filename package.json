@@ -1,7 +1,7 @@
 {
   "name": "hkm-razorpay",
   "version": "1.0.0",
-  "description": "Krishna Pulse Youth Fest — registration & event backend",
+  "description": "Krishna Pulse Youth Fest \u2014 registration & event backend",
   "main": "index.js",
   "engines": {
     "node": ">=18 <23"
@@ -29,9 +29,6 @@
     "mongoose": "^8.17.0",
     "pdf-lib": "^1.17.1",
     "razorpay": "^2.9.6"
-  },
-  "optionalDependencies": {
-    "canvas": "^3.2.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
