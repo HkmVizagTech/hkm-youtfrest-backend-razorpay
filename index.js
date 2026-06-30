@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const cors = require('cors');
 const { Connection } = require('./src/config/db');
 const { CandidateRouter } = require('./src/routes/candidate.routes');
@@ -41,6 +42,27 @@ app.use(express.urlencoded({ extended: true }));
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.json({ status: 'ok', service: 'Krishna Pulse API' }));
 
+// ── DB diagnostic (no secrets exposed) ──────────────────────────────────────────
+// Reports connection state and the last connection error message. The MongoDB
+// URI value itself is NEVER returned — only whether it is set, and (if present)
+// the host portion with credentials stripped.
+app.get('/db-status', (_req, res) => {
+  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  let uriHost = null;
+  if (process.env.MONGO_URI) {
+    try {
+      const afterAt = process.env.MONGO_URI.split('@')[1] || '';
+      uriHost = afterAt.split('/')[0].split('?')[0] || null; // host only, no user/pass
+    } catch { uriHost = null; }
+  }
+  res.json({
+    dbState: states[mongoose.connection.readyState] || mongoose.connection.readyState,
+    hasMongoUri: !!process.env.MONGO_URI,
+    uriHost,
+    lastDbError: global.__lastDbError || null,
+  });
+});
+
 // ── Routes ─────────────────────────────────────────────────────────────────────
 app.use('/users', CandidateRouter);
 app.use('/admin/users', userRouter);
@@ -66,8 +88,10 @@ app.listen(PORT, '0.0.0.0', () => {
 const connectWithRetry = async (attempt = 1) => {
   try {
     await Connection();
+    global.__lastDbError = null;
     console.log('✅ MongoDB connected');
   } catch (err) {
+    global.__lastDbError = err.message;
     console.error(`❌ DB connection failed (attempt ${attempt}):`, err.message);
     setTimeout(() => connectWithRetry(attempt + 1), 5000);
   }
