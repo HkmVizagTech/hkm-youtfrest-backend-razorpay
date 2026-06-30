@@ -53,12 +53,26 @@ app.use((err, _req, res, _next) => {
 
 // ── Start ──────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3300;
-app.listen(PORT, '0.0.0.0', async () => {
+
+// Start listening immediately so the platform healthcheck on `/` succeeds
+// regardless of DB connection timing.
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server listening on port ${PORT}`);
+});
+
+// Connect to MongoDB separately. Retry instead of exiting, so a slow or
+// briefly-unavailable database doesn't take the whole service down.
+const connectWithRetry = async (attempt = 1) => {
   try {
     await Connection();
-    console.log(`✅ Server running on port ${PORT}`);
+    console.log('✅ MongoDB connected');
   } catch (err) {
-    console.error('❌ DB connection failed:', err.message);
-    process.exit(1);
+    console.error(`❌ DB connection failed (attempt ${attempt}):`, err.message);
+    if (attempt < 10) {
+      setTimeout(() => connectWithRetry(attempt + 1), 5000);
+    } else {
+      console.error('❌ Giving up on DB connection after 10 attempts');
+    }
   }
-});
+};
+connectWithRetry();
