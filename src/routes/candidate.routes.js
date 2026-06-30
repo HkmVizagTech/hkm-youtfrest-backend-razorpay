@@ -8,6 +8,7 @@ CandidateRouter.get("/admin/scanned-list", CandidateController.adminScannedList)
 CandidateRouter.get("/eligible-for-certificate", CandidateController.getEligibleCandidatesForCertificate);
 CandidateRouter.get("/verify-payment/:id", CandidateController.verifyPaymentId);
 CandidateRouter.get("/send", CandidateController.sendTemplate);
+CandidateRouter.post("/admin/send-event-reminder", CandidateController.sendEventReminder);
 
 
 CandidateRouter.get("/certificate-statistics", CandidateController.getCertificateStatistics);

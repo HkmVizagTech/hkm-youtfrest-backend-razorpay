@@ -545,6 +545,55 @@ const CandidateController = {
       res.status(500).json({ status: 'error', message: err.message });
     }
   },
+
+  // ── Admin: event-day reminder broadcast (Template #4) ───────────────────────
+  // Sends the "Event Reminder" WhatsApp template to paid registrants who
+  // haven't checked in yet. Manually triggered by an admin before the event.
+  // TODO: swap GUPSHUP_TEMPLATE_ID / sendWhatsapp for the Flaxxa WAPI call +
+  // approved Flaxxa template ID once the API contract is available.
+  sendEventReminder: async (req, res) => {
+    try {
+      const { slot, timeToEvent, venue, excludeAttended = true } = req.body;
+
+      if (!timeToEvent || !venue) {
+        return res.status(400).json({
+          status: 'error',
+          message: '"timeToEvent" and "venue" are required (used as template variables {{2}} and {{3}})',
+        });
+      }
+
+      const query = { paymentStatus: 'Paid' };
+      if (slot) query.slot = slot;
+      if (excludeAttended) query.attendance = { $ne: true };
+
+      const candidates = await Candidate.find(query);
+      const valid = candidates.filter(c => normalizePhone(c.whatsappNumber));
+      const results = [];
+
+      for (const c of valid) {
+        try {
+          // Template params map to {{1}} name, {{2}} timeToEvent, {{3}} venue
+          await sendWhatsapp(c, [c.name, timeToEvent, venue], process.env.FLAXXA_REMINDER_TEMPLATE_ID || process.env.GUPSHUP_TEMPLATE_ID);
+          results.push({ name: c.name, status: 'sent' });
+        } catch (err) {
+          results.push({ name: c.name, status: 'failed', error: err.message });
+        }
+        // gentle throttle to avoid provider rate limits on large broadcasts
+        await new Promise(r => setTimeout(r, 1200));
+      }
+
+      res.json({
+        status: 'completed',
+        total: candidates.length,
+        valid: valid.length,
+        sent: results.filter(r => r.status === 'sent').length,
+        failed: results.filter(r => r.status === 'failed').length,
+        results,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
 };
 
 module.exports = { CandidateController };
