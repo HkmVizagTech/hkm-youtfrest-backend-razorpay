@@ -3,7 +3,8 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const sendWhatsapp = require('../utils/sendWhatsappGupshup'); // ← swap to Flaxxa when API contract is available
+const sendWhatsapp = require('../utils/sendWhatsappFlaxxa');
+const { e164 } = sendWhatsapp;
 const {
   sendCertificateWithCloudinary,
   generateDocumentId,
@@ -89,7 +90,7 @@ const CandidateController = {
       await candidate.save();
 
       if (candidate.whatsappNumber) {
-        await sendWhatsapp(candidate).catch(err =>
+        await sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
           console.error('WhatsApp send failed (non-fatal):', err.message)
         );
       }
@@ -137,7 +138,7 @@ const CandidateController = {
           await candidate.save();
 
           if (candidate.whatsappNumber) {
-            await sendWhatsapp(candidate).catch(err =>
+            await sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
               console.error('Webhook WhatsApp send failed (non-fatal):', err.message)
             );
           }
@@ -240,7 +241,7 @@ const CandidateController = {
         candidate.attendance = true;
         candidate.attendanceDate = new Date();
         await candidate.save();
-        await sendWhatsapp(candidate, [candidate.name], '88021e4e-88ae-4cba-bdba-f9b1be3b4948').catch(err =>
+        await sendWhatsapp.sendAttendanceConfirmed(candidate).catch(err =>
           console.error('Attendance WhatsApp failed (non-fatal):', err.message)
         );
       }
@@ -367,6 +368,12 @@ const CandidateController = {
             certificateDriveViewLink: result.cloudinary?.url,
             certificateFileName: `${result.documentId}.pdf`,
           });
+          // Template #3 — send certificate PDF via WhatsApp
+          if (result.cloudinary?.url) {
+            await sendWhatsapp.sendCertificate(c, result.cloudinary.url).catch(err =>
+              console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
+            );
+          }
           success++;
           results.push({ name: c.name, status: 'success', documentId: result.documentId });
         } catch (err) {
@@ -532,8 +539,8 @@ const CandidateController = {
 
       for (const user of valid) {
         try {
-          // TODO: replace with Flaxxa WAPI template call when API contract is available
-          await sendWhatsapp(user, templateParams, process.env.GUPSHUP_TEMPLATE_ID);
+          // Generic template send — uses sendTemplate directly for flexibility
+          await sendWhatsapp.sendTemplate(e164(user.whatsappNumber), process.env.GUPSHUP_TEMPLATE_ID, templateParams || []);
           results.push({ name: user.name, status: 'sent' });
         } catch (err) {
           results.push({ name: user.name, status: 'failed', error: err.message });
@@ -573,7 +580,8 @@ const CandidateController = {
       for (const c of valid) {
         try {
           // Template params map to {{1}} name, {{2}} timeToEvent, {{3}} venue
-          await sendWhatsapp(c, [c.name, timeToEvent, venue], process.env.FLAXXA_REMINDER_TEMPLATE_ID || process.env.GUPSHUP_TEMPLATE_ID);
+          // Template #4 — Event Reminder via Flaxxa WAPI
+          await sendWhatsapp.sendEventReminder(c, timeToEvent, venue);
           results.push({ name: c.name, status: 'sent' });
         } catch (err) {
           results.push({ name: c.name, status: 'failed', error: err.message });
