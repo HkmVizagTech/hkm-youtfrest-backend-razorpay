@@ -5,6 +5,7 @@ const { Connection } = require('./src/config/db');
 const { CandidateRouter } = require('./src/routes/candidate.routes');
 const { userRouter } = require('./src/routes/user.Routes');
 const { CandidateController } = require('./src/controllers/Candidate.controller');
+const { startCertificateAutoSendJob } = require('./src/jobs/certificateAutoSend');
 const bodyParser = require('body-parser');
 require('dotenv').config();
 
@@ -69,6 +70,7 @@ const connectWithRetry = async (attempt = 1) => {
     await Connection();
     global.__lastDbError = null;
     console.log('✅ MongoDB connected');
+    startCertificateAutoSendJob();
   } catch (err) {
     global.__lastDbError = err.message;
     console.error(`❌ DB connection failed (attempt ${attempt}):`, err.message);

@@ -55,6 +55,11 @@ const CandidateController = {
         paymentAmount: parseFloat(amount) / 100,
         receipt,
         email: formData.email,
+        utmSource: formData.utmSource,
+        utmMedium: formData.utmMedium,
+        utmCampaign: formData.utmCampaign,
+        utmTerm: formData.utmTerm,
+        utmContent: formData.utmContent,
       });
       await candidate.save();
       res.json(order);

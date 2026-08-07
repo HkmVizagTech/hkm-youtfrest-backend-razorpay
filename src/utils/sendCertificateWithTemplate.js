@@ -351,5 +351,6 @@ async function sendCertificateWithCloudinary(candidate, certificatePath, templat
 module.exports = {
   generateCertificatePDF,
   sendCertificateWithCloudinary,
-  generateDocumentId
+  generateDocumentId,
+  uploadToCloudinary
 };

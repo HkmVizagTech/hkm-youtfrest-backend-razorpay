@@ -53,6 +53,12 @@ const candidateSchema = new mongoose.Schema({
 
   paymentUpdatedBy: { type: String, enum: ['manual', 'webhook'], default: 'manual' },
   razorpayPaymentData: { type: mongoose.Schema.Types.Mixed },
+
+  utmSource: { type: String },
+  utmMedium: { type: String },
+  utmCampaign: { type: String },
+  utmTerm: { type: String },
+  utmContent: { type: String },
 }, { timestamps: true });
 
 const Candidate = mongoose.model('Candidate', candidateSchema);
