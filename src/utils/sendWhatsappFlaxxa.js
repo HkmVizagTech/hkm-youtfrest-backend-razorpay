@@ -10,10 +10,12 @@
  *                             (usually "en" or "en_US", default "en")
  *
  * Template env vars (set once templates are approved in Flaxxa):
- *   WAPI_TMPL_REGISTRATION  — Template #1: registration confirmation
- *   WAPI_TMPL_ATTENDANCE    — Template #2: attendance confirmed
- *   WAPI_TMPL_CERTIFICATE   — Template #3: certificate delivery (PDF attachment)
- *   WAPI_TMPL_REMINDER      — Template #4: event-day reminder broadcast
+ *   WAPI_TMPL_REGISTRATION_FEMALE  — Template #1: registration confirm (girls group link)
+ *   WAPI_TMPL_REGISTRATION_MALE    — Template #1: registration confirm (boys group link)
+ *   WAPI_TMPL_REGISTRATION         — Template #1 fallback when gender-specific not set
+ *   WAPI_TMPL_ATTENDANCE           — Template #2: attendance confirmed
+ *   WAPI_TMPL_CERTIFICATE          — Template #3: certificate delivery (PDF attachment)
+ *   WAPI_TMPL_REMINDER             — Template #4: event-day reminder broadcast
  */
 
 const axios = require('axios');
@@ -53,12 +55,23 @@ function e164(phone) {
  * Send a pre-approved template message (text-only body/buttons).
  * components follows Meta Cloud API format:
  * [{ type: "body", parameters: [{ type: "text", text: "..." }] }]
+ * Internally converted to Flaxxa's flat body_text_N format.
  */
 async function sendTemplate(phone, templateName, components = []) {
   if (!isConfigured()) {
     console.warn(`[wapi] WAPI_TOKEN not set — skipping ${templateName} to ${phone}`);
     return { skipped: true };
   }
+
+  // Convert Meta-style components to Flaxxa's flat body_text_N params
+  const bodyComp = components.find(c => c.type === 'body');
+  const flatParams = {};
+  if (bodyComp && Array.isArray(bodyComp.parameters)) {
+    bodyComp.parameters.forEach((p, i) => {
+      flatParams[`body_text_${i + 1}`] = p.text;
+    });
+  }
+
   const res = await axios.post(
     `${BASE}/api/v1/sendtemplatemessage`,
     {
@@ -66,7 +79,7 @@ async function sendTemplate(phone, templateName, components = []) {
       phone: e164(phone),
       template_name: templateName,
       template_language: lang(),
-      components,
+      ...flatParams,
     },
     { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000 }
   );
@@ -108,22 +121,28 @@ async function sendTemplateWithAttachment(phone, templateName, attachmentUrl, bo
 /**
  * Template #1 — Registration Confirmation (Utility)
  * Fires: after successful Razorpay payment (verifyPayment + webhook)
- * Variables: {{1}} name, {{2}} slot, {{3}} amount
+ *
+ * Two Flaxxa templates are used so each candidate gets the correct
+ * WhatsApp group link (the link is hardcoded in the template at
+ * verification time, since one template can't hold both links):
+ *   - female → WAPI_TMPL_REGISTRATION_FEMALE  (girls group link)
+ *   - everyone else → WAPI_TMPL_REGISTRATION_MALE (boys group link)
+ * Variables: {{1}} name
  */
 async function sendRegistrationConfirmed(candidate) {
-  const templateName = process.env.WAPI_TMPL_REGISTRATION;
+  const gender = (candidate.gender || '').trim().toLowerCase();
+  const male = process.env.WAPI_TMPL_REGISTRATION_MALE || process.env.WAPI_TMPL_REGISTRATION;
+  const templateName = gender === 'female'
+    ? process.env.WAPI_TMPL_REGISTRATION_FEMALE || male
+    : male;
   if (!templateName) {
-    console.warn('[wapi] WAPI_TMPL_REGISTRATION not set — skipping registration confirmation');
+    console.warn('[wapi] no registration template configured (WAPI_TMPL_REGISTRATION_FEMALE/MALE) — skipping');
     return { skipped: true };
   }
   return sendTemplate(candidate.whatsappNumber, templateName, [
     {
       type: 'body',
-      parameters: [
-        { type: 'text', text: candidate.name },
-        { type: 'text', text: candidate.slot || 'TBD' },
-        { type: 'text', text: String(candidate.paymentAmount || 49) },
-      ],
+      parameters: [{ type: 'text', text: candidate.name }],
     },
   ]);
 }
