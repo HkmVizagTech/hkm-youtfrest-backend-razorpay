@@ -63,12 +63,12 @@ async function sendTemplate(phone, templateName, components = []) {
     return { skipped: true };
   }
 
-  // Convert Meta-style components to Flaxxa's flat body_text_N params
+  // Convert Meta-style components to Flaxxa's flat body_body_N params
   const bodyComp = components.find(c => c.type === 'body');
   const flatParams = {};
   if (bodyComp && Array.isArray(bodyComp.parameters)) {
     bodyComp.parameters.forEach((p, i) => {
-      flatParams[`body_text_${i + 1}`] = p.text;
+      flatParams[`body_body_${i + 1}`] = p.text;
     });
   }
 
