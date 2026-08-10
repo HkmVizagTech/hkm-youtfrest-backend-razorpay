@@ -13,19 +13,17 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
 let isRunning = false;
 
-const SLOT_MORNING_END = process.env.SLOT_MORNING_END || '13:00';
-const SLOT_EVENING_END = process.env.SLOT_EVENING_END || '19:00';
+const CERTIFICATE_SEND_TIME = process.env.CERTIFICATE_SEND_TIME || '09:00';
 
-function slotEndTime(c) {
-  const slot = (c.slot || '').toLowerCase();
-  let timeStr = SLOT_MORNING_END;
-  if (slot.includes('evening')) timeStr = SLOT_EVENING_END;
-
+// Certificate is sent the day AFTER the attendee's slot at CERTIFICATE_SEND_TIME
+// (default 09:00), instead of immediately on slot completion.
+function certificateSendTime(c) {
   const base = c.attendanceDate || c.registrationDate || c.createdAt || new Date();
-  const end = new Date(base);
-  const [h, m] = timeStr.split(':').map(Number);
-  end.setHours(h, m, 0, 0);
-  return end;
+  const send = new Date(base);
+  send.setDate(send.getDate() + 1);
+  const [h, m] = CERTIFICATE_SEND_TIME.split(':').map(Number);
+  send.setHours(h, m, 0, 0);
+  return send;
 }
 
 async function sendCertificateToCandidate(c) {
@@ -72,14 +70,14 @@ async function runCertificateAutoSend() {
 
     const eligible = candidates.filter(c => {
       if (!c.attendanceDate && !c.registrationDate && !c.createdAt) return false;
-      return slotEndTime(c) <= now;
+      return certificateSendTime(c) <= now;
     });
 
     results.scanned = eligible.length;
     if (!eligible.length) return results;
 
     console.log(
-      `🎓 Auto-send: ${eligible.length} eligible attendee(s) found (their slot has completed)`
+      `🎓 Auto-send: ${eligible.length} eligible attendee(s) found (past next-day ${CERTIFICATE_SEND_TIME} send time)`
     );
 
     for (let i = 0; i < eligible.length; i++) {
@@ -125,7 +123,7 @@ function startCertificateAutoSendJob() {
   const intervalMs = Math.max(intervalMinutes, 0.5) * 60 * 1000;
 
   console.log(
-    `⏰ Auto certificate job started — runs every ${intervalMinutes} min, sends at slot completion (Morning ${SLOT_MORNING_END}, Evening ${SLOT_EVENING_END})`
+    `⏰ Auto certificate job started — runs every ${intervalMinutes} min, sends the next day at ${CERTIFICATE_SEND_TIME}`
   );
 
   runCertificateAutoSend().catch(() => {});
