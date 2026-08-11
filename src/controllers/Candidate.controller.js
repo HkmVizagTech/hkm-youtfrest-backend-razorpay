@@ -35,8 +35,25 @@ const CandidateController = {
   createOrder: async (req, res) => {
     const { amount, formData } = req.body;
     const receipt = `receipt_${Date.now()}`;
+
+    // Validate before touching Razorpay — avoids creating orphaned orders on
+    // Razorpay's side when the request is malformed.
+    if (!formData || !formData.name || !formData.name.trim()) {
+      return res.status(400).json({ status: 'error', message: 'Name is required' });
+    }
+    if (!formData.whatsappNumber || !/^\d{10}$/.test(String(formData.whatsappNumber).replace(/\D/g, ''))) {
+      return res.status(400).json({ status: 'error', message: 'A valid 10-digit WhatsApp number is required' });
+    }
+    if (!formData.dob || isNaN(new Date(formData.dob).getTime())) {
+      return res.status(400).json({ status: 'error', message: 'A valid date of birth is required' });
+    }
+    const numericAmount = Number(amount);
+    if (!numericAmount || numericAmount <= 0) {
+      return res.status(400).json({ status: 'error', message: 'A valid amount is required' });
+    }
+
     try {
-      const order = await razorpay.orders.create({ amount, currency: 'INR', receipt });
+      const order = await razorpay.orders.create({ amount: numericAmount, currency: 'INR', receipt });
       const candidate = new Candidate({
         serialNo: formData.serialNo,
         name: formData.name.trim(),
@@ -52,7 +69,7 @@ const CandidateController = {
         slot: formData.slot,
         paymentStatus: 'Pending',
         orderId: order.id,
-        paymentAmount: parseFloat(amount) / 100,
+        paymentAmount: numericAmount / 100,
         receipt,
         email: formData.email,
         utmSource: formData.utmSource,
@@ -83,8 +100,43 @@ const CandidateController = {
     }
 
     try {
-      const candidate = await Candidate.findOne({ orderId: razorpay_order_id });
-      if (!candidate) return res.status(404).json({ status: 'fail', message: 'Candidate not found' });
+      let candidate = await Candidate.findOne({ orderId: razorpay_order_id });
+
+      if (!candidate) {
+        // The signature is valid — Razorpay genuinely charged this payment —
+        // but we have no matching "Pending" record (e.g. it was never saved
+        // due to a transient DB hiccup during createOrder). Rather than
+        // losing a paid registration behind a 404, reconstruct it from the
+        // formData the client already has.
+        console.warn(`verifyPayment: no candidate found for order ${razorpay_order_id} — reconstructing from formData`);
+        if (!formData || !formData.whatsappNumber) {
+          return res.status(404).json({
+            status: 'fail',
+            message: 'We could not locate your registration, but your payment ID has been logged. Please contact support with this payment ID.',
+            paymentId: razorpay_payment_id,
+          });
+        }
+        candidate = new Candidate({
+          serialNo: formData.serialNo,
+          name: (formData.name || '').trim(),
+          gender: formData.gender,
+          college: formData.college,
+          course: formData.course,
+          year: formData.year,
+          dob: formData.dob ? new Date(formData.dob) : undefined,
+          registrationDate: new Date(),
+          collegeOrWorking: formData.collegeOrWorking,
+          companyName: formData.companyName,
+          whatsappNumber: String(formData.whatsappNumber).startsWith('91')
+            ? String(formData.whatsappNumber)
+            : '91' + formData.whatsappNumber,
+          slot: formData.slot,
+          orderId: razorpay_order_id,
+          paymentAmount: formData.paymentAmount || 49,
+          email: formData.email,
+        });
+      }
+
       if (candidate.paymentStatus === 'Paid') return res.json({ message: 'Already Registered', candidate });
 
       candidate.paymentId = razorpay_payment_id;

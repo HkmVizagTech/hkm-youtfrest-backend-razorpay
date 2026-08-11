@@ -60,7 +60,7 @@ Your *Certificate of Completion* for the Krishna Pulse Youth Fest has been gener
 👤 Participant: ${candidate.name}
 🏫 College: ${candidate.college}
 📚 Course: ${candidate.course}
-📅 Event Date: 15th August 2025
+📅 Event Date: 6th September 2026
 
 Thank you for being part of this amazing spiritual journey! Your participation and enthusiasm made the event truly special. 🙏
 
