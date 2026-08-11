@@ -59,16 +59,34 @@ const userController = {
 
   register: async (req, res) => {
     try {
-      const { name, email, password } = req.body;
+      const { name, email, password, role } = req.body;
       if (!name || !email || !password)
         return res.status(400).json({ message: 'Name, email, and password are required' });
+
+      const userCount = await userModel.countDocuments();
+
+      if (userCount > 0) {
+        // Not the first account — this must be an authenticated admin
+        // creating a teammate. req.user is set by the `authenticate`
+        // middleware on this route.
+        if (!req.user || req.user.role !== 'admin') {
+          return res.status(403).json({ message: 'Only an admin can create new accounts' });
+        }
+        if (role && !['admin', 'user'].includes(role)) {
+          return res.status(400).json({ message: 'Role must be "admin" or "user"' });
+        }
+      }
+      // If userCount === 0, this is the very first account for this
+      // deployment — allowed without auth so there's a way in, and it's
+      // always created as admin regardless of what's in the request body.
+      const finalRole = userCount === 0 ? 'admin' : (role || 'user');
 
       const existing = await userModel.findOne({ email });
       if (existing) return res.status(400).json({ message: 'User already exists' });
 
       const hashed = await bcrypt.hash(password, 10);
-      const user = await userModel.create({ name, email, password: hashed });
-      res.status(201).json({ message: 'Registration successful' });
+      await userModel.create({ name, email, password: hashed, role: finalRole });
+      res.status(201).json({ message: 'Registration successful', role: finalRole });
     } catch (err) {
       res.status(500).json({ message: err.message });
     }
