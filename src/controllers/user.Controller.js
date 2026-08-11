@@ -72,14 +72,14 @@ const userController = {
         if (!req.user || req.user.role !== 'admin') {
           return res.status(403).json({ message: 'Only an admin can create new accounts' });
         }
-        if (role && !['admin', 'user'].includes(role)) {
-          return res.status(400).json({ message: 'Role must be "admin" or "user"' });
+        if (role && !['admin', 'volunteer', 'user'].includes(role)) {
+          return res.status(400).json({ message: 'Role must be "admin" or "volunteer"' });
         }
       }
       // If userCount === 0, this is the very first account for this
       // deployment — allowed without auth so there's a way in, and it's
       // always created as admin regardless of what's in the request body.
-      const finalRole = userCount === 0 ? 'admin' : (role || 'user');
+      const finalRole = userCount === 0 ? 'admin' : (role || 'volunteer');
 
       const existing = await userModel.findOne({ email });
       if (existing) return res.status(400).json({ message: 'User already exists' });
