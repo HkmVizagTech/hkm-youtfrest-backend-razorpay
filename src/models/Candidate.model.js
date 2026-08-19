@@ -8,6 +8,7 @@ const candidateSchema = new mongoose.Schema({
   course: { type: String },
   companyName: { type: String },
   collegeOrWorking: { type: String, enum: ['College', 'Working'] },
+  accommodationType: { type: String, enum: ['Hosteler', 'Day Scholar'], default: 'Day Scholar' },
   email: { type: String },
   year: { type: String },
   dob: { type: Date },

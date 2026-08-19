@@ -64,6 +64,7 @@ const CandidateController = {
         dob: new Date(formData.dob),
         registrationDate: new Date(),
         collegeOrWorking: formData.collegeOrWorking,
+        accommodationType: formData.accommodationType,
         companyName: formData.companyName,
         whatsappNumber: '91' + formData.whatsappNumber,
         slot: formData.slot,
@@ -126,6 +127,7 @@ const CandidateController = {
           dob: formData.dob ? new Date(formData.dob) : undefined,
           registrationDate: new Date(),
           collegeOrWorking: formData.collegeOrWorking,
+          accommodationType: formData.accommodationType,
           companyName: formData.companyName,
           whatsappNumber: String(formData.whatsappNumber).startsWith('91')
             ? String(formData.whatsappNumber)
