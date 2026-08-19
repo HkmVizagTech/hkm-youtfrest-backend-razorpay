@@ -8,6 +8,7 @@ const { CollegeRouter } = require('./src/routes/college.routes');
 const { CandidateController } = require('./src/controllers/Candidate.controller');
 const { startCertificateAutoSendJob } = require('./src/jobs/certificateAutoSend');
 const { seedCollegeAdmins } = require('./src/utils/seedCollegeAdmins');
+const { seedAdmins } = require('./src/utils/seedAdmins');
 const bodyParser = require('body-parser');
 require('dotenv').config();
 
@@ -74,6 +75,7 @@ const connectWithRetry = async (attempt = 1) => {
     global.__lastDbError = null;
     console.log('✅ MongoDB connected');
     await seedCollegeAdmins();
+    await seedAdmins();
     startCertificateAutoSendJob();
   } catch (err) {
     global.__lastDbError = err.message;
