@@ -30,6 +30,24 @@ const normalizePhone = (number) => {
   return null;
 };
 
+// Razorpay's SDK throws errors shaped like { error: { description, code } }
+// rather than a normal Error with a .message — without this, failures were
+// logged (and shown to the student) as a bare "undefined".
+const describeError = (err) =>
+  err?.error?.description || err?.message || 'Something went wrong';
+
+// The Razorpay SDK exposes no timeout option and uses axios with no default
+// timeout internally — a slow/hanging response from Razorpay's API would
+// otherwise hang this call (and the student's browser) indefinitely. Race it
+// against a hard deadline so it always fails fast and predictably instead.
+const withTimeout = (promise, ms, label) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+
 const CandidateController = {
   // ── Public: create Razorpay order + save pending candidate ─────────────────
   createOrder: async (req, res) => {
@@ -53,7 +71,11 @@ const CandidateController = {
     }
 
     try {
-      const order = await razorpay.orders.create({ amount: numericAmount, currency: 'INR', receipt });
+      const order = await withTimeout(
+        razorpay.orders.create({ amount: numericAmount, currency: 'INR', receipt }),
+        15000,
+        'Razorpay order creation'
+      );
       const candidate = new Candidate({
         serialNo: formData.serialNo,
         name: formData.name.trim(),
@@ -82,8 +104,9 @@ const CandidateController = {
       await candidate.save();
       res.json(order);
     } catch (err) {
-      console.error('createOrder error:', err.message);
-      res.status(500).json({ status: 'error', message: err.message });
+      const message = describeError(err);
+      console.error('createOrder error:', message);
+      res.status(500).json({ status: 'error', message });
     }
   },
 
@@ -148,15 +171,18 @@ const CandidateController = {
       candidate.paymentUpdatedBy = 'manual';
       await candidate.save();
 
+      // Respond to the student immediately — their payment is confirmed and
+      // saved. WhatsApp is sent in the background (fire-and-forget) so a
+      // slow message provider never delays their confirmation screen.
+      res.json({ message: 'success', candidate });
+
       if (candidate.whatsappNumber) {
-        await sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
+        sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
           console.error('WhatsApp send failed (non-fatal):', err.message)
         );
       }
-
-      res.json({ message: 'success', candidate });
     } catch (err) {
-      console.error('verifyPayment error:', err.message);
+      console.error('verifyPayment error:', describeError(err));
       res.status(500).json({ status: 'error', message: 'Registration failed' });
     }
   },
@@ -197,13 +223,13 @@ const CandidateController = {
           await candidate.save();
 
           if (candidate.whatsappNumber) {
-            await sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
+            sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
               console.error('Webhook WhatsApp send failed (non-fatal):', err.message)
             );
           }
         }
       } catch (err) {
-        console.error('Webhook processing error:', err.message);
+        console.error('Webhook processing error:', describeError(err));
         return res.status(500).send('error');
       }
     }
