@@ -241,19 +241,26 @@ const CandidateController = {
     try {
       const { page = 1, limit = 50, paymentStatus } = req.query;
       const query = paymentStatus ? { paymentStatus } : {};
-      const candidates = await Candidate.find(query)
-        .limit(limit * 1)
-        .skip((page - 1) * limit)
-        .sort({ registrationDate: -1 });
+
+      // `limit=all` (or no limit/page requested at all) returns every
+      // matching candidate — the admin "All Candidates" view does its own
+      // filtering/search/export client-side on the full list, so it needs
+      // everything in one response rather than a 50-per-page slice.
+      const wantsAll = limit === 'all' || (!req.query.limit && !req.query.page);
+
+      let candidatesQuery = Candidate.find(query).sort({ registrationDate: -1 });
+      if (!wantsAll) {
+        candidatesQuery = candidatesQuery.limit(limit * 1).skip((page - 1) * limit);
+      }
+
+      const candidates = await candidatesQuery;
       const total = await Candidate.countDocuments(query);
       res.json({
         status: 'success',
         candidates,
-        pagination: {
-          currentPage: +page,
-          totalPages: Math.ceil(total / limit),
-          totalCandidates: total,
-        },
+        pagination: wantsAll
+          ? { currentPage: 1, totalPages: 1, totalCandidates: total }
+          : { currentPage: +page, totalPages: Math.ceil(total / limit), totalCandidates: total },
       });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
