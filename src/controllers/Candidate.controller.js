@@ -88,7 +88,7 @@ const CandidateController = {
         collegeOrWorking: formData.collegeOrWorking,
         accommodationType: formData.accommodationType,
         companyName: formData.companyName,
-        whatsappNumber: '91' + formData.whatsappNumber,
+        whatsappNumber: normalizePhone(formData.whatsappNumber),
         slot: formData.slot,
         paymentStatus: 'Pending',
         orderId: order.id,
@@ -152,9 +152,7 @@ const CandidateController = {
           collegeOrWorking: formData.collegeOrWorking,
           accommodationType: formData.accommodationType,
           companyName: formData.companyName,
-          whatsappNumber: String(formData.whatsappNumber).startsWith('91')
-            ? String(formData.whatsappNumber)
-            : '91' + formData.whatsappNumber,
+          whatsappNumber: normalizePhone(formData.whatsappNumber) || String(formData.whatsappNumber),
           slot: formData.slot,
           orderId: razorpay_order_id,
           paymentAmount: formData.paymentAmount || 49,
@@ -279,7 +277,15 @@ const CandidateController = {
 
   updateCandidate: async (req, res) => {
     try {
-      const candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+      const updates = { ...req.body };
+      if (updates.whatsappNumber) {
+        const normalized = normalizePhone(updates.whatsappNumber);
+        if (!normalized) {
+          return res.status(400).json({ status: 'error', message: 'Enter a valid 10-digit WhatsApp number' });
+        }
+        updates.whatsappNumber = normalized;
+      }
+      const candidate = await Candidate.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
       if (!candidate) return res.status(404).json({ status: 'error', message: 'Not found' });
       res.json({ status: 'success', candidate });
     } catch (err) {

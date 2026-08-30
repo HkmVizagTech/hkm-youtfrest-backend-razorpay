@@ -1,5 +1,6 @@
 const express = require('express');
 const { CandidateController } = require('../controllers/Candidate.controller');
+const { authenticate } = require('../middlewares/auth.middleware');
 const CandidateRouter = express.Router();
 
 
@@ -31,7 +32,7 @@ CandidateRouter.post('/admin/attendance-scan', CandidateController.adminAttendan
 CandidateRouter.post('/generate-single-certificate', CandidateController.generateSingleCertificateOnly);
 
 
-CandidateRouter.put('/:id', CandidateController.updateCandidate);     
+CandidateRouter.put('/:id', authenticate(['admin']), CandidateController.updateCandidate);     
 CandidateRouter.delete('/asm', CandidateController.deleteByName);
 CandidateRouter.delete('/:id', CandidateController.deleteCandidate);     
 
