@@ -715,14 +715,19 @@ const CandidateController = {
 
       let candidates = [];
       if (isRrn) {
+        // exact RRN first; if none, fall back to phone match
         const byRrn = await Candidate.find({ rrn: q }).sort({ createdAt: -1 });
         if (byRrn.length) {
           candidates = byRrn;
         } else {
           candidates = await Candidate.find({ whatsappNumber: { $regex: digitsOnly + '$' } }).sort({ createdAt: -1 });
         }
-      } else {
+      } else if (/^\d{10}$/.test(digitsOnly)) {
+        // 10-digit number -> phone search (shows duplicates)
         candidates = await Candidate.find({ whatsappNumber: { $regex: digitsOnly + '$' } }).sort({ createdAt: -1 });
+      } else {
+        // anything else (letters/name) -> name search
+        candidates = await Candidate.find({ name: { $regex: new RegExp(q, 'i') } }).sort({ createdAt: -1 });
       }
 
       res.json({ status: 'success', candidates });
