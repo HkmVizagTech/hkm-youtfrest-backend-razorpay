@@ -410,7 +410,7 @@ const CandidateController = {
   adminScannedList: async (req, res) => {
     try {
       const candidates = await Candidate.find({ adminAttendance: true })
-        .select('name email whatsappNumber college branch gender slot rrn adminAttendanceDate')
+        .select('name email whatsappNumber college branch gender slot rrn utr adminAttendanceDate paymentMethod')
         .sort({ adminAttendanceDate: -1 });
       res.json(candidates);
     } catch (err) {
@@ -704,7 +704,76 @@ const CandidateController = {
     }
   },
 
-  // ── Help Desk: search by RRN or phone ─────────────────────────────────────
+  // ── Help Desk / Reception: on-spot walk-in registration ─────────────────
+  onSpotRegister: async (req, res) => {
+    try {
+      const { name, whatsappNumber, gender, college, course, year, email, slot, paymentAmount, paymentMethod, utr } = req.body;
+
+      if (!name || !name.trim()) {
+        return res.status(400).json({ status: 'error', message: 'Name is required' });
+      }
+      const normalized = normalizePhone(whatsappNumber);
+      if (!normalized) {
+        return res.status(400).json({ status: 'error', message: 'A valid 10-digit WhatsApp number is required' });
+      }
+
+      // If paid via UPI, UTR is required and must be unique
+      const method = paymentMethod === 'UPI' ? 'UPI' : 'Cash';
+      if (method === 'UPI') {
+        const trimmedUtr = (utr || '').trim();
+        if (!trimmedUtr) {
+          return res.status(400).json({ status: 'error', message: 'UTR is required for UPI payments' });
+        }
+        const existing = await Candidate.findOne({ utr: trimmedUtr });
+        if (existing) {
+          return res.status(409).json({
+            status: 'error',
+            message: `UTR already used for ${existing.name} (${existing.whatsappNumber})`,
+          });
+        }
+      }
+
+      const candidate = new Candidate({
+        name: name.trim(),
+        whatsappNumber: normalized,
+        gender,
+        college,
+        course,
+        year,
+        email,
+        slot,
+        paymentStatus: 'Paid',
+        paymentMethod: method,
+        paymentId: method === 'UPI' ? 'onsite-upi' : 'onsite-cash',
+        paymentAmount: Number(paymentAmount) || 49,
+        paymentDate: new Date(),
+        registrationDate: new Date(),
+        utr: method === 'UPI' ? utr.trim() : undefined,
+      });
+
+      // Generate attendance token so the QR works immediately
+      candidate.attendanceToken = candidate._id.toString();
+      await candidate.save();
+
+      // Respond immediately — send WhatsApp in background (fire-and-forget)
+      res.status(201).json({
+        status: 'success',
+        message: 'On-spot registration successful',
+        candidate,
+      });
+
+      if (candidate.whatsappNumber) {
+        sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
+          console.error('On-spot WhatsApp failed (non-fatal):', err.message)
+        );
+      }
+    } catch (err) {
+      console.error('onSpotRegister error:', err.message);
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Help Desk: search by UTR or phone ──────────────────────────────────────
   helpDeskSearch: async (req, res) => {
     try {
       const q = (req.query.q || '').trim();

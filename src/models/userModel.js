@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema({
     password:{type:String,required:true},
     // "user" is a legacy value kept so any accounts created before this
     // rename keep working. New accounts should use "volunteer".
-    role:{type:String, enum:["admin", "user", "volunteer", "collegeadmin"], default:"volunteer"},
+    role:{type:String, enum:["admin", "user", "volunteer", "collegeadmin", "reception"], default:"volunteer"},
 },{
     versionKey:false,
     timestamps:true

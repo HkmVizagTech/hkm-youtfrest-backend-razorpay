@@ -19,8 +19,9 @@ CandidateRouter.get("/certificate/:documentId", CandidateController.getCertifica
 
 CandidateRouter.get('/', CandidateController.getAllCandidates);           
 
-CandidateRouter.get("/help-desk/search", authenticate(['admin']), CandidateController.helpDeskSearch);
-CandidateRouter.post("/help-desk/fix", authenticate(['admin']), CandidateController.helpDeskFix);
+CandidateRouter.get("/help-desk/search", authenticate(['admin', 'reception']), CandidateController.helpDeskSearch);
+CandidateRouter.post("/help-desk/fix", authenticate(['admin', 'reception']), CandidateController.helpDeskFix);
+CandidateRouter.post("/on-spot-register", authenticate(['admin', 'reception']), CandidateController.onSpotRegister);
 
 
 CandidateRouter.post('/send-certificates', CandidateController.sendCertificates);

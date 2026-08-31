@@ -72,8 +72,8 @@ const userController = {
         if (!req.user || req.user.role !== 'admin') {
           return res.status(403).json({ message: 'Only an admin can create new accounts' });
         }
-        if (role && !['admin', 'volunteer', 'user', 'collegeadmin'].includes(role)) {
-          return res.status(400).json({ message: 'Role must be "admin", "volunteer", or "collegeadmin"' });
+        if (role && !['admin', 'volunteer', 'user', 'collegeadmin', 'reception'].includes(role)) {
+          return res.status(400).json({ message: 'Role must be "admin", "volunteer", "reception", or "collegeadmin"' });
         }
       }
       // If userCount === 0, this is the very first account for this
