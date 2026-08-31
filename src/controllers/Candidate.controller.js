@@ -9,6 +9,7 @@ const {
   sendCertificateWithCloudinary,
   generateDocumentId,
   generateCertificatePDF,
+  uploadToCloudinary,
 } = require('../utils/sendCertificateWithTemplate');
 require('dotenv').config();
 
@@ -459,24 +460,31 @@ const CandidateController = {
         if (c.certificateSent) { alreadySent++; results.push({ name: c.name, status: 'already-sent' }); continue; }
 
         try {
-          const result = await sendCertificateWithCloudinary(c, tempDir);
-          if (!result.success) throw new Error(result.error);
+          const documentId = generateDocumentId(c.name);
+          const outputPath = path.join(tempDir, `${documentId}.pdf`);
+          await generateCertificatePDF(c.name, outputPath, documentId);
+
+          const cloudinaryResult = await uploadToCloudinary(outputPath, documentId);
+          if (!cloudinaryResult.success) throw new Error(`Cloudinary upload failed: ${cloudinaryResult.error}`);
 
           await Candidate.findByIdAndUpdate(c._id, {
             certificateSent: true, certificateSentDate: new Date(),
-            certificateDocumentId: result.documentId,
-            certificateDriveFileId: result.cloudinary?.publicId,
-            certificateDriveViewLink: result.cloudinary?.url,
-            certificateFileName: `${result.documentId}.pdf`,
+            certificateDocumentId: documentId,
+            certificateDriveFileId: cloudinaryResult.publicId,
+            certificateDriveViewLink: cloudinaryResult.url,
+            certificateFileName: `${documentId}.pdf`,
           });
-          // Template #3 — send certificate PDF via WhatsApp
-          if (result.cloudinary?.url) {
-            await sendWhatsapp.sendCertificate(c, result.cloudinary.url).catch(err =>
-              console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
-            );
-          }
+
+          // Send via Flaxxa WhatsApp
+          await sendWhatsapp.sendCertificate(c, cloudinaryResult.url).catch(err =>
+            console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
+          );
+
+          // Clean up temp file
+          try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
+
           success++;
-          results.push({ name: c.name, status: 'success', documentId: result.documentId });
+          results.push({ name: c.name, status: 'success', documentId });
         } catch (err) {
           failed++;
           results.push({ name: c.name, status: 'failed', error: err.message });
@@ -502,18 +510,32 @@ const CandidateController = {
       if (c.certificateSent)
         return res.json({ status: 'already-sent', message: `Certificate already sent to ${c.name}`, sentDate: c.certificateSentDate });
 
-      const result = await sendCertificateWithCloudinary(c, tempDir);
-      if (!result.success) return res.status(500).json({ status: 'error', message: result.error });
+      const documentId = generateDocumentId(c.name);
+      const outputPath = path.join(tempDir, `${documentId}.pdf`);
+      await generateCertificatePDF(c.name, outputPath, documentId);
+
+      const cloudinaryResult = await uploadToCloudinary(outputPath, documentId);
+      if (!cloudinaryResult.success) {
+        return res.status(500).json({ status: 'error', message: `Cloudinary upload failed: ${cloudinaryResult.error}` });
+      }
 
       await Candidate.findByIdAndUpdate(candidateId, {
         certificateSent: true, certificateSentDate: new Date(),
-        certificateDocumentId: result.documentId,
-        certificateDriveFileId: result.cloudinary?.publicId,
-        certificateDriveViewLink: result.cloudinary?.url,
-        certificateFileName: `${result.documentId}.pdf`,
+        certificateDocumentId: documentId,
+        certificateDriveFileId: cloudinaryResult.publicId,
+        certificateDriveViewLink: cloudinaryResult.url,
+        certificateFileName: `${documentId}.pdf`,
       });
 
-      res.json({ status: 'success', message: `Certificate sent to ${c.name}`, documentId: result.documentId });
+      // Send via Flaxxa WhatsApp
+      await sendWhatsapp.sendCertificate(c, cloudinaryResult.url).catch(err =>
+        console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
+      );
+
+      // Clean up temp file
+      try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
+
+      res.json({ status: 'success', message: `Certificate sent to ${c.name}`, documentId });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
     }
@@ -528,17 +550,29 @@ const CandidateController = {
       if (!c.attendance || c.paymentStatus !== 'Paid')
         return res.status(400).json({ status: 'error', message: 'Candidate not eligible' });
 
-      const result = await sendCertificateWithCloudinary(c, tempDir);
-      if (!result.success) return res.status(500).json({ status: 'error', message: result.error });
+      const documentId = generateDocumentId(c.name);
+      const outputPath = path.join(tempDir, `${documentId}.pdf`);
+      await generateCertificatePDF(c.name, outputPath, documentId);
+
+      const cloudinaryResult = await uploadToCloudinary(outputPath, documentId);
+      if (!cloudinaryResult.success) {
+        return res.status(500).json({ status: 'error', message: `Cloudinary upload failed: ${cloudinaryResult.error}` });
+      }
 
       await Candidate.findByIdAndUpdate(candidateId, {
         certificateSent: true, certificateSentDate: new Date(),
-        certificateDocumentId: result.documentId,
-        certificateDriveFileId: result.cloudinary?.publicId,
-        certificateDriveViewLink: result.cloudinary?.url,
+        certificateDocumentId: documentId,
+        certificateDriveFileId: cloudinaryResult.publicId,
+        certificateDriveViewLink: cloudinaryResult.url,
       });
 
-      res.json({ status: 'success', message: `Certificate resent to ${c.name}`, documentId: result.documentId });
+      await sendWhatsapp.sendCertificate(c, cloudinaryResult.url).catch(err =>
+        console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
+      );
+
+      try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
+
+      res.json({ status: 'success', message: `Certificate resent to ${c.name}`, documentId });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
     }
