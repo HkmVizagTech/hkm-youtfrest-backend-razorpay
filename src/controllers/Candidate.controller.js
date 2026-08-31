@@ -168,6 +168,13 @@ const CandidateController = {
       candidate.paymentStatus = 'Paid';
       candidate.paymentMethod = 'Online';
       candidate.paymentUpdatedBy = 'manual';
+      // Assign every paid candidate their own attendance token right away —
+      // not lazily when they check in. This guarantees each registration
+      // (even ones sharing a WhatsApp number with someone else, e.g. a
+      // parent registering multiple kids) always has its own valid QR pass.
+      if (!candidate.attendanceToken) {
+        candidate.attendanceToken = candidate._id.toString();
+      }
       await candidate.save();
 
       // Respond to the student immediately — their payment is confirmed and
@@ -221,6 +228,9 @@ const CandidateController = {
           candidate.paymentUpdatedBy = 'webhook';
           if (!candidate.rrn) {
             candidate.rrn = (payment.acquirer_data && payment.acquirer_data.rrn) || payment.rrn || null;
+          }
+          if (!candidate.attendanceToken) {
+            candidate.attendanceToken = candidate._id.toString();
           }
           await candidate.save();
 
@@ -321,17 +331,37 @@ const CandidateController = {
   // ── Public: attendee marks own attendance by phone ─────────────────────────
   markAttendance: async (req, res) => {
     try {
-      const { whatsappNumber } = req.body;
+      const { whatsappNumber, candidateId } = req.body;
       const normalized = normalizePhone(whatsappNumber);
       if (!normalized) return res.status(400).json({ message: 'Invalid WhatsApp number format' });
 
-      const candidate = await Candidate.findOne({ whatsappNumber: normalized, paymentStatus: 'Paid' }).sort({ createdAt: -1 });
-      if (!candidate) {
+      const paidMatches = await Candidate.find({ whatsappNumber: normalized, paymentStatus: 'Paid' }).sort({ createdAt: 1 });
+
+      if (paidMatches.length === 0) {
         const exists = await Candidate.findOne({ whatsappNumber: normalized });
         return res.status(exists ? 403 : 404).json({
           message: exists ? 'Payment not completed. Attendance cannot be marked.' : 'Candidate not found',
         });
       }
+
+      // Multiple paid registrations share this number (e.g. a parent
+      // registered several kids under one number). Without a specific
+      // choice, we don't know who's actually checking in — ask instead of
+      // guessing, which used to silently pick the most recent one and made
+      // earlier registrations impossible to check in.
+      if (paidMatches.length > 1 && !candidateId) {
+        return res.json({
+          status: 'multiple',
+          message: `We found ${paidMatches.length} registrations under this number. Please select who's checking in.`,
+          candidates: paidMatches.map(c => ({ id: c._id, name: c.name, attendance: !!c.attendance })),
+        });
+      }
+
+      const candidate = candidateId
+        ? paidMatches.find(c => c._id.toString() === candidateId)
+        : paidMatches[0];
+
+      if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
       if (!candidate.attendanceToken) {
         candidate.attendanceToken = candidate._id.toString();
@@ -343,7 +373,7 @@ const CandidateController = {
         candidate.attendance = true;
         candidate.attendanceDate = new Date();
         await candidate.save();
-        await sendWhatsapp.sendAttendanceConfirmed(candidate).catch(err =>
+        sendWhatsapp.sendAttendanceConfirmed(candidate).catch(err =>
           console.error('Attendance WhatsApp failed (non-fatal):', err.message)
         );
       }
