@@ -794,6 +794,47 @@ const CandidateController = {
       res.status(500).json({ status: 'error', message: err.message });
     }
   },
+
+  // ── Help Desk: backfill RRN for existing paid candidates ─────────────────
+  backfillRrn: async (req, res) => {
+    try {
+      const candidates = await Candidate.find({
+        paymentStatus: 'Paid',
+        $or: [{ rrn: { $exists: false } }, { rrn: null }, { rrn: '' }],
+      }).select('name paymentId razorpayPaymentData rrn');
+
+      let updated = 0;
+      let withData = 0;
+      let skipped = 0;
+      const log = [];
+
+      for (const c of candidates) {
+        const data = c.razorpayPaymentData;
+        const rrn =
+          (data && data.rrn) ||
+          (data && data.acquirer_data && (data.acquirer_data.rrn || data.acquirer_data.bank_transaction_id));
+        if (!rrn) {
+          skipped++;
+          log.push({ name: c.name, ok: false, reason: 'no stored Razorpay data / no RRN' });
+          continue;
+        }
+        c.rrn = rrn;
+        await c.save();
+        updated++;
+        withData++;
+        log.push({ name: c.name, ok: true, rrn });
+      }
+
+      res.json({
+        status: 'success',
+        message: `Backfill complete`,
+        summary: { found: candidates.length, updated, withData, skipped },
+        log,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
 };
 
 module.exports = { CandidateController };

@@ -21,6 +21,7 @@ CandidateRouter.get('/', CandidateController.getAllCandidates);
 
 CandidateRouter.get("/help-desk/search", authenticate(['admin']), CandidateController.helpDeskSearch);
 CandidateRouter.post("/help-desk/fix", authenticate(['admin']), CandidateController.helpDeskFix);
+CandidateRouter.post("/admin/backfill-rrn", authenticate(['admin']), CandidateController.backfillRrn);
 
 
 CandidateRouter.post('/send-certificates', CandidateController.sendCertificates);
