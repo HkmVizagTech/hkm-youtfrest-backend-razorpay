@@ -26,6 +26,7 @@ const candidateSchema = new mongoose.Schema({
   paymentAmount: { type: Number, required: true },
   paymentDate: { type: Date },
   paymentMethod: { type: String },
+  rrn: { type: String },
   receipt: { type: String },
 
   remindersSent: {

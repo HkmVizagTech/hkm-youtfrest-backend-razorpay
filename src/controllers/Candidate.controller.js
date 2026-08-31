@@ -211,13 +211,16 @@ const CandidateController = {
       const payment = payload.payment.entity;
       try {
         const candidate = await Candidate.findOne({ orderId: payment.order_id });
-        if (candidate && candidate.paymentStatus !== 'Paid') {
+        if (candidate) {
           candidate.paymentStatus = 'Paid';
           candidate.paymentId = payment.id;
           candidate.paymentDate = new Date();
           candidate.paymentMethod = payment.method || 'Online';
           candidate.razorpayPaymentData = payment;
           candidate.paymentUpdatedBy = 'webhook';
+          if (!candidate.rrn) {
+            candidate.rrn = (payment.acquirer_data && payment.acquirer_data.rrn) || payment.rrn || null;
+          }
           await candidate.save();
 
           if (candidate.whatsappNumber) {
@@ -395,7 +398,7 @@ const CandidateController = {
   attendanceList: async (req, res) => {
     try {
       const candidates = await Candidate.find({ attendance: true })
-        .select('name email whatsappNumber college branch gender slot course attendance attendanceDate registrationDate')
+        .select('name email whatsappNumber college branch gender slot course rrn attendance attendanceDate registrationDate')
         .sort({ attendanceDate: -1 });
       res.json(candidates);
     } catch (err) {
@@ -407,7 +410,7 @@ const CandidateController = {
   adminScannedList: async (req, res) => {
     try {
       const candidates = await Candidate.find({ adminAttendance: true })
-        .select('name email whatsappNumber college branch gender slot adminAttendanceDate')
+        .select('name email whatsappNumber college branch gender slot rrn adminAttendanceDate')
         .sort({ adminAttendanceDate: -1 });
       res.json(candidates);
     } catch (err) {
@@ -696,6 +699,97 @@ const CandidateController = {
         failed: results.filter(r => r.status === 'failed').length,
         results,
       });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Help Desk: search by RRN or phone ─────────────────────────────────────
+  helpDeskSearch: async (req, res) => {
+    try {
+      const q = (req.query.q || '').trim();
+      if (!q) return res.status(400).json({ status: 'error', message: 'Search term is required' });
+
+      const digitsOnly = q.replace(/\D/g, '');
+      const isRrn = /^\d{6,20}$/.test(digitsOnly);
+
+      let candidates = [];
+      if (isRrn) {
+        const byRrn = await Candidate.find({ rrn: q }).sort({ createdAt: -1 });
+        if (byRrn.length) {
+          candidates = byRrn;
+        } else {
+          candidates = await Candidate.find({ whatsappNumber: { $regex: digitsOnly + '$' } }).sort({ createdAt: -1 });
+        }
+      } else {
+        candidates = await Candidate.find({ whatsappNumber: { $regex: digitsOnly + '$' } }).sort({ createdAt: -1 });
+      }
+
+      res.json({ status: 'success', candidates });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Help Desk: fix actions on a matched candidate ─────────────────────────
+  helpDeskFix: async (req, res) => {
+    try {
+      const { id, action, name, whatsappNumber, email } = req.body;
+      if (!id) return res.status(400).json({ status: 'error', message: 'Candidate id is required' });
+
+      const candidate = await Candidate.findById(id);
+      if (!candidate) return res.status(404).json({ status: 'error', message: 'Not found' });
+
+      switch (action) {
+        case 'updateDetails': {
+          const updates = {};
+          if (name !== undefined && name !== null) {
+            const n = String(name).trim();
+            if (!n) return res.status(400).json({ status: 'error', message: 'Name cannot be empty' });
+            updates.name = n;
+          }
+          if (whatsappNumber !== undefined && whatsappNumber !== null && whatsappNumber !== '') {
+            const normalized = normalizePhone(whatsappNumber);
+            if (!normalized) {
+              return res.status(400).json({ status: 'error', message: 'Enter a valid 10-digit WhatsApp number' });
+            }
+            updates.whatsappNumber = normalized;
+          }
+          if (email !== undefined && email !== null) updates.email = String(email).trim();
+          candidate.set(updates);
+          await candidate.save();
+          return res.json({ status: 'success', candidate, message: 'Details updated' });
+        }
+
+        case 'regenerateQr': {
+          candidate.attendanceToken = candidate._id.toString();
+          candidate.attendance = true;
+          if (!candidate.attendanceDate) candidate.attendanceDate = new Date();
+          await candidate.save();
+          return res.json({ status: 'success', candidate, message: 'QR regenerated and attendance enabled' });
+        }
+
+        case 'markPresent': {
+          candidate.attendance = true;
+          if (!candidate.attendanceDate) candidate.attendanceDate = new Date();
+          candidate.adminAttendance = true;
+          if (!candidate.adminAttendanceDate) candidate.adminAttendanceDate = new Date();
+          await candidate.save();
+          return res.json({ status: 'success', candidate, message: 'Marked present' });
+        }
+
+        case 'resetAttendance': {
+          candidate.attendance = false;
+          candidate.attendanceDate = undefined;
+          candidate.adminAttendance = false;
+          candidate.adminAttendanceDate = undefined;
+          await candidate.save();
+          return res.json({ status: 'success', candidate, message: 'Attendance reset' });
+        }
+
+        default:
+          return res.status(400).json({ status: 'error', message: 'Unknown action' });
+      }
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
     }
