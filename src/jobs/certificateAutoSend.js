@@ -28,22 +28,24 @@ const MAX_ATTEMPTS = Number(process.env.CERTIFICATE_MAX_ATTEMPTS || 3);
 const TZ_OFFSET_MIN = Number(process.env.CERTIFICATE_TZ_OFFSET_MINUTES || 330); // +05:30
 const TZ_OFFSET_MS = TZ_OFFSET_MIN * 60 * 1000;
 
-function certificateSendTime(c) {
-  const base = new Date(c.attendanceDate || c.registrationDate || c.createdAt || Date.now());
+// The send window is ONE MOMENT FOR THE WHOLE EVENT, not per attendee.
+// Everyone who registered (paid) and attended gets their certificate at
+// EVENT_DATE + CERTIFICATE_SEND_DELAY_DAYS at CERTIFICATE_SEND_TIME IST.
+//
+// It deliberately is NOT keyed off each attendee's own attendanceDate: someone
+// checked in at 00:30 on the 7th, or whose attendance an admin fixes up two days
+// late, would otherwise have their certificate pushed a day or two past
+// everybody else's. Once the window opens it stays open, so late attendance
+// marks are picked up on the very next poll.
+const EVENT_DATE = process.env.EVENT_DATE || '2026-09-06'; // IST calendar date
 
-  // Shift the instant into IST space so the UTC getters read as IST wall clock.
-  const ist = new Date(base.getTime() + TZ_OFFSET_MS);
-  const [h, m] = CERTIFICATE_SEND_TIME.split(':').map(Number);
+function certificateWindowOpensAt() {
+  const [y, mo, d] = EVENT_DATE.split('-').map(Number);
+  const [h, mi] = CERTIFICATE_SEND_TIME.split(':').map(Number);
 
-  // Same IST calendar day + delay, at HH:MM IST.
-  const sendIstMs = Date.UTC(
-    ist.getUTCFullYear(),
-    ist.getUTCMonth(),
-    ist.getUTCDate() + SEND_DELAY_DAYS,
-    h, m, 0, 0
-  );
-
-  // Back to a real UTC instant for comparison against Date.now().
+  // Build the instant in IST wall-clock space, then shift out to real UTC.
+  // (Never setHours() — that reads the container TZ, which is UTC on Railway.)
+  const sendIstMs = Date.UTC(y, mo - 1, d + SEND_DELAY_DAYS, h, mi, 0, 0);
   return new Date(sendIstMs - TZ_OFFSET_MS);
 }
 
@@ -90,6 +92,16 @@ async function runCertificateAutoSend() {
 
   try {
     const now = new Date();
+    const opensAt = certificateWindowOpensAt();
+    results.windowOpensAt = opensAt;
+
+    // Nothing goes out before the window opens — one moment for the whole event.
+    if (now < opensAt) {
+      results.waiting = true;
+      return results;
+    }
+
+    // Registered (paid) AND attended. Non-attendees never get a certificate.
     const candidates = await Candidate.find({
       attendance: true,
       paymentStatus: 'Paid',
@@ -97,15 +109,12 @@ async function runCertificateAutoSend() {
     }).sort({ attendanceDate: 1 });
 
     const eligible = candidates.filter(c => {
-      if (!c.attendanceDate && !c.registrationDate && !c.createdAt) return false;
-      if (certificateSendTime(c) > now) return false;
       // Delivery failures no longer flip certificateSent (that was the old
       // silent-failure bug), so without a cap a permanently bad number would be
       // retried every few minutes forever — regenerating a PDF and burning a
       // Cloudinary upload each time. Give up after MAX_ATTEMPTS and let an admin
       // fix the number and resend by hand.
-      if ((c.certificateAttempts || 0) >= MAX_ATTEMPTS) return false;
-      return true;
+      return (c.certificateAttempts || 0) < MAX_ATTEMPTS;
     });
 
     results.scanned = eligible.length;
@@ -124,9 +133,8 @@ async function runCertificateAutoSend() {
     if (!eligible.length) return results;
 
     console.log(
-      `🎓 Auto-send: ${eligible.length} eligible attendee(s) — send time is ` +
-      `${CERTIFICATE_SEND_TIME} IST, ${SEND_DELAY_DAYS} day(s) after attendance. ` +
-      `Now: ${ist(now)}`
+      `🎓 Auto-send: ${eligible.length} paid + attended candidate(s) awaiting certificates. ` +
+      `Window opened ${ist(opensAt)}; now ${ist(now)}.`
     );
 
     for (let i = 0; i < eligible.length; i++) {
@@ -181,15 +189,20 @@ function startCertificateAutoSendJob() {
   const intervalMinutes = parseFloat(process.env.CERTIFICATE_JOB_INTERVAL_MINUTES || '5');
   const intervalMs = Math.max(intervalMinutes, 0.5) * 60 * 1000;
 
-  // Show a worked example on boot so a wrong TZ is obvious in the deploy logs
-  // instead of being discovered five and a half hours late on the day.
-  const example = certificateSendTime({ attendanceDate: new Date() });
+  // Print the resolved window on boot so a wrong EVENT_DATE or timezone is
+  // obvious in the deploy log, instead of being discovered on the morning it
+  // was supposed to fire.
+  const opensAt = certificateWindowOpensAt();
   console.log(
     `⏰ Auto certificate job started — polls every ${intervalMinutes} min.\n` +
-    `   Send time: ${CERTIFICATE_SEND_TIME} IST, ${SEND_DELAY_DAYS} day(s) after attendance ` +
+    `   Event date: ${EVENT_DATE} (IST). Certificates go to everyone who is ` +
+    `Paid + Attended,\n` +
+    `   all at once, ${SEND_DELAY_DAYS} day(s) later at ${CERTIFICATE_SEND_TIME} IST ` +
     `(max ${MAX_ATTEMPTS} attempts each).\n` +
+    `   → Window opens ${ist(opensAt)}` +
+    (Date.now() < opensAt.getTime() ? ' (waiting)' : ' (OPEN — sending now)') + '\n' +
     `   Container TZ is ${Intl.DateTimeFormat().resolvedOptions().timeZone}; ` +
-    `someone attending right now would be sent at ${ist(example)}.`
+    `server time now ${ist(new Date())}.`
   );
 
   runCertificateAutoSend().catch(() => {});
