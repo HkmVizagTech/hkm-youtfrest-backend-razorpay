@@ -497,6 +497,14 @@ const CandidateController = {
           const cloudinaryResult = await uploadToCloudinary(outputPath, documentId);
           if (!cloudinaryResult.success) throw new Error(`Cloudinary upload failed: ${cloudinaryResult.error}`);
 
+          // Send via Flaxxa WhatsApp BEFORE marking it sent — otherwise a failed
+          // delivery still flips certificateSent and nobody ever retries.
+          // sendCertificate throws when Flaxxa or Meta reject the message.
+          const waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
+          if (waResult && waResult.skipped) {
+            throw new Error('WAPI_TMPL_CERTIFICATE is not set — WhatsApp delivery skipped');
+          }
+
           await Candidate.findByIdAndUpdate(c._id, {
             certificateSent: true, certificateSentDate: new Date(),
             certificateDocumentId: documentId,
@@ -505,16 +513,11 @@ const CandidateController = {
             certificateFileName: `${documentId}.pdf`,
           });
 
-          // Send via Flaxxa WhatsApp
-          await sendWhatsapp.sendCertificate(c, cloudinaryResult.url).catch(err =>
-            console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
-          );
-
           // Clean up temp file
           try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
 
           success++;
-          results.push({ name: c.name, status: 'success', documentId });
+          results.push({ name: c.name, status: 'success', documentId, wamid: waResult?.message_wamid });
         } catch (err) {
           failed++;
           results.push({ name: c.name, status: 'failed', error: err.message });
@@ -549,6 +552,24 @@ const CandidateController = {
         return res.status(500).json({ status: 'error', message: `Cloudinary upload failed: ${cloudinaryResult.error}` });
       }
 
+      // Send on WhatsApp first — only mark it sent once Meta has accepted it.
+      let waResult;
+      try {
+        waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
+        if (waResult && waResult.skipped) {
+          throw new Error('WAPI_TMPL_CERTIFICATE is not set — WhatsApp delivery skipped');
+        }
+      } catch (waErr) {
+        console.error(`Certificate WhatsApp failed for ${c.name}:`, waErr.message);
+        try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
+        return res.status(502).json({
+          status: 'error',
+          message: `Certificate generated but WhatsApp delivery failed: ${waErr.message}`,
+          documentId,
+          certificateUrl: cloudinaryResult.url,
+        });
+      }
+
       await Candidate.findByIdAndUpdate(candidateId, {
         certificateSent: true, certificateSentDate: new Date(),
         certificateDocumentId: documentId,
@@ -557,15 +578,10 @@ const CandidateController = {
         certificateFileName: `${documentId}.pdf`,
       });
 
-      // Send via Flaxxa WhatsApp
-      await sendWhatsapp.sendCertificate(c, cloudinaryResult.url).catch(err =>
-        console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
-      );
-
       // Clean up temp file
       try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
 
-      res.json({ status: 'success', message: `Certificate sent to ${c.name}`, documentId });
+      res.json({ status: 'success', message: `Certificate sent to ${c.name}`, documentId, wamid: waResult?.message_wamid });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
     }
@@ -589,6 +605,23 @@ const CandidateController = {
         return res.status(500).json({ status: 'error', message: `Cloudinary upload failed: ${cloudinaryResult.error}` });
       }
 
+      let waResult;
+      try {
+        waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
+        if (waResult && waResult.skipped) {
+          throw new Error('WAPI_TMPL_CERTIFICATE is not set — WhatsApp delivery skipped');
+        }
+      } catch (waErr) {
+        console.error(`Certificate WhatsApp failed for ${c.name}:`, waErr.message);
+        try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
+        return res.status(502).json({
+          status: 'error',
+          message: `Certificate generated but WhatsApp delivery failed: ${waErr.message}`,
+          documentId,
+          certificateUrl: cloudinaryResult.url,
+        });
+      }
+
       await Candidate.findByIdAndUpdate(candidateId, {
         certificateSent: true, certificateSentDate: new Date(),
         certificateDocumentId: documentId,
@@ -596,13 +629,9 @@ const CandidateController = {
         certificateDriveViewLink: cloudinaryResult.url,
       });
 
-      await sendWhatsapp.sendCertificate(c, cloudinaryResult.url).catch(err =>
-        console.error(`Certificate WhatsApp failed for ${c.name} (non-fatal):`, err.message)
-      );
-
       try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
 
-      res.json({ status: 'success', message: `Certificate resent to ${c.name}`, documentId });
+      res.json({ status: 'success', message: `Certificate resent to ${c.name}`, documentId, wamid: waResult?.message_wamid });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
     }
@@ -624,7 +653,9 @@ const CandidateController = {
     try {
       const tempOk = fs.existsSync(tempDir);
       const cloudinaryOk = !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
-      const whatsappOk = !!(process.env.GUPSHUP_API_KEY || process.env.FLAXXA_WAPI_TOKEN);
+      // Flaxxa is the live provider; the token env var is WAPI_TOKEN (the old
+      // FLAXXA_WAPI_TOKEN name never existed, so this always read "missing").
+      const whatsappOk = !!(process.env.WAPI_TOKEN && process.env.WAPI_TMPL_CERTIFICATE);
       res.json({
         status: 'success',
         health: {

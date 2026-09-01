@@ -9,7 +9,19 @@ const fontkit = require('@pdf-lib/fontkit');
 const { v2: cloudinary } = require('cloudinary');
 
 
-const FONT_SIZE = 36;
+// ── Name placement on the certificate template ───────────────────────────────
+// Measured from the KP26 Canva design (A4 landscape, 842.25 × 595.5 pt):
+//   the name box is The Seasons Bold @ 30pt, baseline y = 309.64 (= 0.52 × page
+//   height), text centred on x = 431.5 (the design's own centre line — the page
+//   centre is 421.1, which sits ~10pt to the left of every other text block).
+// All four are env-tunable so a re-cut template can be matched without a code
+// change. Re-measure with: pdfplumber → extract_words(extra_attrs=['size'])
+// on a template that still has a sample name in it.
+const FONT_SIZE = Number(process.env.CERT_FONT_SIZE || 30);
+const NAME_Y_RATIO = Number(process.env.CERT_NAME_Y_RATIO || 0.52);
+const NAME_CENTER_X = process.env.CERT_NAME_CENTER_X ? Number(process.env.CERT_NAME_CENTER_X) : 431.5;
+const NAME_MAX_WIDTH = Number(process.env.CERT_NAME_MAX_WIDTH || 600);
+const NAME_UPPERCASE = process.env.CERT_NAME_UPPERCASE === 'true';
 
 const GUPSHUP_API_KEY = process.env.GUPSHUP_API_KEY || process.env.GUPSHUP_API_KEY;
 const GUPSHUP_SOURCE = process.env.GUPSHUP_SOURCE || '917075176108';
@@ -112,17 +124,30 @@ async function generateCertificatePDF(candidateName, outputPath, documentId = nu
     customFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   }
 
-  const cleanName = String(candidateName || '').trim().replace(/\s+/g, ' ') || 'Participant';
-  const textWidth = customFont.widthOfTextAtSize(cleanName, FONT_SIZE);
+  let cleanName = String(candidateName || '').trim().replace(/\s+/g, ' ') || 'Participant';
+  if (NAME_UPPERCASE) cleanName = cleanName.toUpperCase();
 
   const { width: pageWidth, height: pageHeight } = page.getSize();
-  const x = (pageWidth - textWidth) / 2;
-  const y = pageHeight * 0.52;
+
+  // Shrink long names so they never run past the rule under the name box.
+  let fontSize = FONT_SIZE;
+  let textWidth = customFont.widthOfTextAtSize(cleanName, fontSize);
+  while (textWidth > NAME_MAX_WIDTH && fontSize > 14) {
+    fontSize -= 0.5;
+    textWidth = customFont.widthOfTextAtSize(cleanName, fontSize);
+  }
+  if (fontSize !== FONT_SIZE) {
+    console.log(`📐 Long name — shrank "${cleanName}" from ${FONT_SIZE}pt to ${fontSize}pt to fit`);
+  }
+
+  const centerX = NAME_CENTER_X ?? pageWidth / 2;
+  const x = centerX - textWidth / 2;
+  const y = pageHeight * NAME_Y_RATIO;
 
   page.drawText(cleanName, {
     x,
     y,
-    size: FONT_SIZE,
+    size: fontSize,
     font: customFont,
     color: rgb(0, 0, 0)
   });

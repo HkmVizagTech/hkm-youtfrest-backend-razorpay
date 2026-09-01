@@ -40,7 +40,7 @@ async function sendCertificateToCandidate(c) {
       throw new Error(`Cloudinary upload failed: ${cloudinaryResult.error}`);
     }
 
-    waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url);
+    waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
     if (waResult && waResult.skipped) {
       throw new Error('Certificate WhatsApp template not configured (WAPI_TMPL_CERTIFICATE)');
     }
