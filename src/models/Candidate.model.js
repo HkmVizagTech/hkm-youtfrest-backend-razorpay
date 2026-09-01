@@ -48,6 +48,12 @@ const candidateSchema = new mongoose.Schema({
   certificateSentDate: { type: Date },
   certificateSentBy: { type: String },
 
+  // Auto-send retry bookkeeping — the job gives up after
+  // CERTIFICATE_MAX_ATTEMPTS so a bad number isn't retried forever.
+  certificateAttempts: { type: Number, default: 0 },
+  certificateLastError: { type: String },
+  certificateLastAttemptAt: { type: Date },
+
 
   certificateDocumentId: { type: String },
   certificateDriveFileId: { type: String },
