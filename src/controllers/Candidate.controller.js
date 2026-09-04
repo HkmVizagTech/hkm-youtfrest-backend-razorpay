@@ -49,6 +49,22 @@ const withTimeout = (promise, ms, label) =>
     ),
   ]);
 
+// In-memory progress for the slot-change broadcast. Deliberately not the source
+// of truth — that is slotChangeNotifiedAt on each candidate, so a restart
+// mid-broadcast loses the counter but never re-messages anyone already done.
+let slotChangeRun = {
+  running: false, total: 0, sent: 0, failed: 0,
+  startedAt: null, finishedAt: null, failures: [],
+};
+
+// Reminder broadcast progress. Same deal — the durable record is the
+// remindersSent.<type> flag on each candidate, not this counter.
+const REMINDER_TYPES = ['threeDay', 'twoDay', 'oneDay', 'twoHour'];
+let reminderRun = {
+  running: false, type: null, total: 0, sent: 0, failed: 0,
+  startedAt: null, finishedAt: null, failures: [],
+};
+
 const CandidateController = {
   // ── Public: create Razorpay order + save pending candidate ─────────────────
   createOrder: async (req, res) => {
@@ -749,50 +765,304 @@ const CandidateController = {
     }
   },
 
+  // ── Admin: slot-change broadcast (Template #5) ─────────────────────────────
+  // Tells Evening-slot registrants their slot has been merged into the Morning
+  // one. Deliberately does NOT modify `slot` — reception still sees what the
+  // student originally booked; only the notification state is recorded.
+  //
+  // Two safety properties matter more than anything here, because this fires at
+  // hundreds of real students two days before the event and cannot be recalled:
+  //   1. dryRun defaults to TRUE. You must pass dryRun:false to send anything.
+  //   2. Every success is stamped with slotChangeNotifiedAt, and already-stamped
+  //      candidates are skipped, so re-running never double-messages anyone.
+  //
+  // The send runs in the BACKGROUND: ~160 messages at a polite throttle takes
+  // minutes, far longer than any HTTP request should be held open. Poll
+  // GET /users/admin/slot-change-status for progress — the DB is the source
+  // of truth, so progress survives a restart mid-run.
+  sendSlotChange: async (req, res) => {
+    try {
+      const {
+        slot = 'Evening',
+        reportingTime,
+        meal,
+        dryRun = true,
+        resend = false,
+        limit,
+        candidateIds,
+      } = req.body || {};
+
+      if (!reportingTime || !meal) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'reportingTime ({{2}}) and meal ({{3}}) are both required',
+        });
+      }
+      if (slotChangeRun.running) {
+        return res.status(409).json({
+          status: 'error',
+          message: 'A slot-change broadcast is already running',
+          progress: slotChangeRun,
+        });
+      }
+
+      const query = { paymentStatus: 'Paid' };
+      if (candidateIds?.length) query._id = { $in: candidateIds };
+      else query.slot = slot;
+      if (!resend) query.slotChangeNotifiedAt = { $exists: false };
+
+      let targets = await Candidate.find(query).sort({ registrationDate: 1 });
+      targets = targets.filter(c => normalizePhone(c.whatsappNumber));
+      if (limit) targets = targets.slice(0, Number(limit));
+
+      const preview = {
+        status: 'success',
+        dryRun: !!dryRun,
+        templateName: process.env.WAPI_TMPL_SLOT_CHANGE || 'kp_slot_change',
+        targeted: targets.length,
+        reportingTime,
+        meal,
+        sample: targets.slice(0, 5).map(c => ({
+          name: c.name, phone: c.whatsappNumber, slot: c.slot, gender: c.gender,
+        })),
+      };
+
+      if (dryRun) {
+        preview.message =
+          `DRY RUN — nothing sent. ${targets.length} candidate(s) would receive the ` +
+          `slot-change notice. Re-send with dryRun:false to actually deliver.`;
+        return res.json(preview);
+      }
+
+      if (!targets.length) {
+        return res.json({ ...preview, message: 'Nothing to send — no matching candidates' });
+      }
+
+      // Fire and forget; the client polls the status endpoint.
+      slotChangeRun = {
+        running: true, total: targets.length, sent: 0, failed: 0,
+        startedAt: new Date(), finishedAt: null, failures: [],
+      };
+      res.json({
+        ...preview,
+        started: true,
+        message:
+          `Sending to ${targets.length} candidate(s) in the background. ` +
+          `Poll GET /users/admin/slot-change-status for progress.`,
+      });
+
+      const throttleMs = Number(process.env.SLOT_CHANGE_THROTTLE_MS || 1200);
+      (async () => {
+        for (const c of targets) {
+          try {
+            const r = await sendWhatsapp.sendSlotChange(c, reportingTime, meal);
+            if (r?.skipped) throw new Error('WAPI_TMPL_SLOT_CHANGE not configured');
+            await Candidate.findByIdAndUpdate(c._id, {
+              slotChangeNotifiedAt: new Date(),
+              slotChangeWamid: r.message_wamid,
+              slotChangeOriginalSlot: c.slot,
+              slotChangeError: undefined,
+            });
+            slotChangeRun.sent++;
+          } catch (err) {
+            slotChangeRun.failed++;
+            slotChangeRun.failures.push({ name: c.name, phone: c.whatsappNumber, error: err.message });
+            await Candidate.findByIdAndUpdate(c._id, { slotChangeError: err.message }).catch(() => {});
+            console.error(`❌ Slot change failed for ${c.name}:`, err.message);
+          }
+          await new Promise(r => setTimeout(r, throttleMs));
+        }
+        slotChangeRun.running = false;
+        slotChangeRun.finishedAt = new Date();
+        console.log(
+          `📣 Slot-change broadcast finished — sent ${slotChangeRun.sent}, failed ${slotChangeRun.failed}`
+        );
+      })();
+    } catch (err) {
+      slotChangeRun.running = false;
+      if (!res.headersSent) res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Admin: slot-change broadcast progress ──────────────────────────────────
+  getSlotChangeStatus: async (req, res) => {
+    try {
+      const slot = req.query.slot || 'Evening';
+      const [paidInSlot, notified, errored] = await Promise.all([
+        Candidate.countDocuments({ paymentStatus: 'Paid', slot }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', slot, slotChangeNotifiedAt: { $exists: true } }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', slot, slotChangeError: { $exists: true, $ne: null } }),
+      ]);
+      res.json({
+        status: 'success',
+        templateConfigured: !!(process.env.WAPI_TOKEN && (process.env.WAPI_TMPL_SLOT_CHANGE || 'kp_slot_change')),
+        slot,
+        paidInSlot,
+        notified,
+        pending: paidInSlot - notified,
+        errored,
+        currentRun: slotChangeRun,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
   // ── Admin: event-day reminder broadcast (Template #4) ───────────────────────
   // Sends the "Event Reminder" WhatsApp template to paid registrants who
   // haven't checked in yet. Manually triggered by an admin before the event.
   // TODO: swap GUPSHUP_TEMPLATE_ID / sendWhatsapp for the Flaxxa WAPI call +
   // approved Flaxxa template ID once the API contract is available.
+  // Since the Evening slot was merged into the Morning one, reminders go to
+  // EVERYONE by default — omit `slot` and pass the Morning timings, and the
+  // ex-Evening registrants receive the Morning details like everybody else.
+  // Pass `slot` only if you deliberately want to target one group.
+  //
+  // `type` picks which remindersSent flag is stamped (threeDay | twoDay |
+  // oneDay | twoHour), which is what makes a re-run safe: candidates already
+  // stamped for that type are excluded. Same dryRun / background / status
+  // treatment as the slot-change broadcast, for the same reason — this is
+  // hundreds of irreversible messages.
   sendEventReminder: async (req, res) => {
     try {
-      const { slot, timeToEvent, venue, excludeAttended = true } = req.body;
+      const {
+        type = 'oneDay',
+        slot,
+        timeToEvent,
+        venue,
+        excludeAttended = true,
+        dryRun = true,
+        resend = false,
+        limit,
+      } = req.body || {};
 
+      if (!REMINDER_TYPES.includes(type)) {
+        return res.status(400).json({
+          status: 'error',
+          message: `"type" must be one of: ${REMINDER_TYPES.join(', ')}`,
+        });
+      }
       if (!timeToEvent || !venue) {
         return res.status(400).json({
           status: 'error',
-          message: '"timeToEvent" and "venue" are required (used as template variables {{2}} and {{3}})',
+          message: '"timeToEvent" and "venue" are required (template variables {{2}} and {{3}})',
+        });
+      }
+      if (reminderRun.running) {
+        return res.status(409).json({
+          status: 'error',
+          message: 'A reminder broadcast is already running',
+          progress: reminderRun,
         });
       }
 
+      const flag = `remindersSent.${type}`;
       const query = { paymentStatus: 'Paid' };
       if (slot) query.slot = slot;
       if (excludeAttended) query.attendance = { $ne: true };
+      if (!resend) query[flag] = { $ne: true };
 
-      const candidates = await Candidate.find(query);
-      const valid = candidates.filter(c => normalizePhone(c.whatsappNumber));
-      const results = [];
+      let targets = await Candidate.find(query).sort({ registrationDate: 1 });
+      targets = targets.filter(c => normalizePhone(c.whatsappNumber));
+      if (limit) targets = targets.slice(0, Number(limit));
 
-      for (const c of valid) {
-        try {
-          // Template params map to {{1}} name, {{2}} timeToEvent, {{3}} venue
-          // Template #4 — Event Reminder via Flaxxa WAPI
-          await sendWhatsapp.sendEventReminder(c, timeToEvent, venue);
-          results.push({ name: c.name, status: 'sent' });
-        } catch (err) {
-          results.push({ name: c.name, status: 'failed', error: err.message });
-        }
-        // gentle throttle to avoid provider rate limits on large broadcasts
-        await new Promise(r => setTimeout(r, 1200));
+      const preview = {
+        status: 'success',
+        dryRun: !!dryRun,
+        type,
+        templateName: process.env.WAPI_TMPL_REMINDER || null,
+        targeted: targets.length,
+        scope: slot ? `slot="${slot}"` : 'ALL paid registrants (Evening merged into Morning)',
+        timeToEvent,
+        venue,
+        sample: targets.slice(0, 5).map(c => ({
+          name: c.name, phone: c.whatsappNumber, slot: c.slot,
+        })),
+      };
+
+      if (!process.env.WAPI_TMPL_REMINDER) {
+        return res.status(400).json({
+          ...preview,
+          status: 'error',
+          message: 'WAPI_TMPL_REMINDER is not set — nothing would be delivered. Set it on Railway first.',
+        });
       }
 
+      if (dryRun) {
+        preview.message =
+          `DRY RUN — nothing sent. ${targets.length} candidate(s) would receive the "${type}" ` +
+          `reminder. Re-send with dryRun:false to actually deliver.`;
+        return res.json(preview);
+      }
+
+      if (!targets.length) {
+        return res.json({ ...preview, message: 'Nothing to send — no matching candidates' });
+      }
+
+      reminderRun = {
+        running: true, type, total: targets.length, sent: 0, failed: 0,
+        startedAt: new Date(), finishedAt: null, failures: [],
+      };
       res.json({
-        status: 'completed',
-        total: candidates.length,
-        valid: valid.length,
-        sent: results.filter(r => r.status === 'sent').length,
-        failed: results.filter(r => r.status === 'failed').length,
-        results,
+        ...preview,
+        started: true,
+        message:
+          `Sending the "${type}" reminder to ${targets.length} candidate(s) in the background. ` +
+          `Poll GET /users/admin/reminder-status?type=${type} for progress.`,
+      });
+
+      const throttleMs = Number(process.env.REMINDER_THROTTLE_MS || 1200);
+      (async () => {
+        for (const c of targets) {
+          try {
+            const r = await sendWhatsapp.sendEventReminder(c, timeToEvent, venue);
+            // A skipped send used to be recorded as "sent" — the same silent
+            // failure that hid the broken certificate delivery for a day.
+            if (r?.skipped) throw new Error('WAPI_TMPL_REMINDER not configured');
+            await Candidate.findByIdAndUpdate(c._id, { [flag]: true });
+            reminderRun.sent++;
+          } catch (err) {
+            reminderRun.failed++;
+            reminderRun.failures.push({ name: c.name, phone: c.whatsappNumber, error: err.message });
+            console.error(`❌ ${type} reminder failed for ${c.name}:`, err.message);
+          }
+          await new Promise(r => setTimeout(r, throttleMs));
+        }
+        reminderRun.running = false;
+        reminderRun.finishedAt = new Date();
+        console.log(
+          `📣 "${type}" reminder finished — sent ${reminderRun.sent}, failed ${reminderRun.failed}`
+        );
+      })();
+    } catch (err) {
+      reminderRun.running = false;
+      if (!res.headersSent) res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Admin: reminder broadcast progress ─────────────────────────────────────
+  getReminderStatus: async (req, res) => {
+    try {
+      const type = req.query.type || 'oneDay';
+      if (!REMINDER_TYPES.includes(type)) {
+        return res.status(400).json({ status: 'error', message: `Unknown reminder type "${type}"` });
+      }
+      const flag = `remindersSent.${type}`;
+      const [paid, notAttended, sent] = await Promise.all([
+        Candidate.countDocuments({ paymentStatus: 'Paid' }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', attendance: { $ne: true } }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', [flag]: true }),
+      ]);
+      res.json({
+        status: 'success',
+        type,
+        templateConfigured: !!process.env.WAPI_TMPL_REMINDER,
+        templateName: process.env.WAPI_TMPL_REMINDER || null,
+        paid,
+        notYetAttended: notAttended,
+        alreadySent: sent,
+        pending: notAttended - sent,
+        currentRun: reminderRun,
       });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });

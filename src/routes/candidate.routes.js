@@ -9,7 +9,15 @@ CandidateRouter.get("/admin/scanned-list", CandidateController.adminScannedList)
 CandidateRouter.get("/eligible-for-certificate", CandidateController.getEligibleCandidatesForCertificate);
 CandidateRouter.get("/verify-payment/:id", CandidateController.verifyPaymentId);
 CandidateRouter.get("/send", CandidateController.sendTemplate);
-CandidateRouter.post("/admin/send-event-reminder", CandidateController.sendEventReminder);
+// Reminder broadcast — admin-only for the same reason as the slot change:
+// it reaches every paid registrant and cannot be recalled.
+CandidateRouter.post("/admin/send-event-reminder", authenticate(['admin']), CandidateController.sendEventReminder);
+CandidateRouter.get("/admin/reminder-status", authenticate(['admin']), CandidateController.getReminderStatus);
+
+// Slot-change broadcast (Evening merged into Morning). Admin-only — this
+// messages hundreds of students and cannot be recalled.
+CandidateRouter.post("/admin/send-slot-change", authenticate(['admin']), CandidateController.sendSlotChange);
+CandidateRouter.get("/admin/slot-change-status", authenticate(['admin']), CandidateController.getSlotChangeStatus);
 
 
 CandidateRouter.get("/certificate-statistics", CandidateController.getCertificateStatistics);

@@ -316,11 +316,54 @@ async function sendEventReminder(candidate, timeToEvent, venue) {
   ]);
 }
 
+/**
+ * Template #5 — Slot Change Notice (Utility)
+ * Fires: admin broadcast when the Evening slot is merged into the Morning one.
+ * Variables: {{1}} name, {{2}} new reporting time, {{3}} meal
+ *
+ * Approved body:
+ *   Hare Krishna {{1}}! 🙏
+ *   Important update regarding the Krishna Pulse Youth Festival on 6th September! 🎉
+ *   Please note that your registration has been moved to the Morning Slot.
+ *   🕒 New Reporting Time: {{2}}
+ *   🍽️ {{3}} + 🏅 Digital Certificate will be provided after the session.
+ *   ...
+ *
+ * EXACTLY three variables. Meta silently drops the message on a count
+ * mismatch (Flaxxa still answers 200) — assertDelivered() catches that.
+ */
+async function sendSlotChange(candidate, reportingTime, meal) {
+  const templateName = process.env.WAPI_TMPL_SLOT_CHANGE || 'kp_slot_change';
+  if (!templateName) {
+    console.warn('[wapi] WAPI_TMPL_SLOT_CHANGE not set — skipping slot change notice');
+    return { skipped: true };
+  }
+  if (!reportingTime || !meal) {
+    throw new Error('sendSlotChange needs both a reportingTime and a meal');
+  }
+
+  // WhatsApp rejects template parameters containing newlines, tabs, or runs of
+  // 4+ spaces. Registration data is free text, so scrub before sending.
+  const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+  return sendTemplate(candidate.whatsappNumber, templateName, [
+    {
+      type: 'body',
+      parameters: [
+        { type: 'text', text: clean(candidate.name) || 'Devotee' },
+        { type: 'text', text: clean(reportingTime) },
+        { type: 'text', text: clean(meal) },
+      ],
+    },
+  ]);
+}
+
 module.exports = {
   sendRegistrationConfirmed,
   sendAttendanceConfirmed,
   sendCertificate,
   sendEventReminder,
+  sendSlotChange,
   // low-level helpers
   sendTemplate,
   sendTemplateWithAttachment,

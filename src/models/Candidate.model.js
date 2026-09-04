@@ -42,7 +42,15 @@ const candidateSchema = new mongoose.Schema({
 
   adminAttendance: { type: Boolean, default: false },
   adminAttendanceDate: { type: Date },
-  attendanceToken: { type: String }, 
+  attendanceToken: { type: String },
+
+  // Slot-change broadcast (Evening merged into Morning). Recorded per
+  // candidate so a re-run never double-messages anyone, and so "did we tell
+  // this student?" is answerable from the database rather than from logs.
+  slotChangeNotifiedAt: { type: Date },
+  slotChangeWamid: { type: String },
+  slotChangeError: { type: String },
+  slotChangeOriginalSlot: { type: String },
 
   certificateSent: { type: Boolean, default: false },
   certificateSentDate: { type: Date },
