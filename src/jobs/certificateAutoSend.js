@@ -16,6 +16,7 @@ let isRunning = false;
 const CERTIFICATE_SEND_TIME = process.env.CERTIFICATE_SEND_TIME || '09:00';
 const SEND_DELAY_DAYS = Number(process.env.CERTIFICATE_SEND_DELAY_DAYS || 1);
 const MAX_ATTEMPTS = Number(process.env.CERTIFICATE_MAX_ATTEMPTS || 3);
+const THROTTLE_MS = Number(process.env.CERTIFICATE_THROTTLE_MS || 800);
 
 // CERTIFICATE_SEND_TIME is IST wall-clock, ALWAYS.
 //
@@ -70,7 +71,12 @@ async function sendCertificateToCandidate(c) {
       throw new Error(`Cloudinary upload failed: ${cloudinaryResult.error}`);
     }
 
-    waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
+    // Upload the PDF straight from disk. The Cloudinary URL is still what gets
+    // stored on the candidate record, but re-downloading it here would cost
+    // seconds per attendee for a file we already have locally.
+    waResult = await sendWhatsapp.sendCertificate(
+      c, cloudinaryResult.url, documentId, certData.outputPath
+    );
     if (waResult && waResult.skipped) {
       throw new Error('Certificate WhatsApp template not configured (WAPI_TMPL_CERTIFICATE)');
     }
@@ -168,7 +174,10 @@ async function runCertificateAutoSend() {
         );
       }
 
-      if (i < eligible.length - 1) await new Promise(r => setTimeout(r, 3000));
+      // Each certificate already takes ~5s of real work (PDF, Cloudinary,
+      // WhatsApp), which is throttle enough on its own. The old flat 3s sleep
+      // added ~45 minutes across a 900-person event for no benefit.
+      if (i < eligible.length - 1) await new Promise(r => setTimeout(r, THROTTLE_MS));
     }
   } catch (err) {
     console.error('❌ Auto certificate job error:', err.message);

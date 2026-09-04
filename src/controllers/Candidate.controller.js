@@ -1,4 +1,6 @@
 const Candidate = require('../models/Candidate.model');
+const MessageLog = require('../models/MessageLog.model');
+const whatsapp = require('../utils/whatsapp');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const path = require('path');
@@ -44,6 +46,23 @@ const resolveSlot = (slot, who = '') => {
   return slot;
 };
 
+// Record every accepted send so a delivery callback has something to update.
+// `accepted` is deliberately not the same word as `delivered` — see
+// MessageLog.model.js for why that distinction cost us 165 messages.
+const logSend = (candidate, kind, template, result) =>
+  MessageLog.create({
+    provider: result?.provider || 'flaxxa',
+    wamid: result?.message_wamid,
+    messageId: String(result?.message_id ?? ''),
+    candidateId: candidate._id,
+    name: candidate.name,
+    phone: candidate.whatsappNumber,
+    kind,
+    template,
+    status: 'accepted',
+    sentAt: new Date(),
+  }).catch(err => console.warn('[msglog] could not record send:', err.message));
+
 const normalizePhone = (number) => {
   const digits = (number || '').replace(/\D/g, '');
   if (/^\d{10}$/.test(digits)) return '91' + digits;
@@ -77,9 +96,14 @@ let slotChangeRun = {
   startedAt: null, finishedAt: null, failures: [],
 };
 
+// kp_slot_change on the Gupshup WABA — same body as the Flaxxa template,
+// verified end-to-end (submitted AND actually received) on 4 Sep 2026, after
+// the Flaxxa number was rate-limited by Meta.
+const GUPSHUP_SLOTCHANGE_ID = 'd7c6e193-b649-483c-8e11-afc969d84eb0';
+
 // Reminder broadcast progress. Same deal — the durable record is the
 // remindersSent.<type> flag on each candidate, not this counter.
-const REMINDER_TYPES = ['threeDay', 'twoDay', 'oneDay', 'twoHour'];
+const REMINDER_TYPES = ['threeDay', 'twoDay', 'oneDay', 'eventDay', 'twoHour'];
 let reminderRun = {
   running: false, type: null, total: 0, sent: 0, failed: 0,
   startedAt: null, finishedAt: null, failures: [],
@@ -838,7 +862,10 @@ const CandidateController = {
       const preview = {
         status: 'success',
         dryRun: !!dryRun,
-        templateName: process.env.WAPI_TMPL_SLOT_CHANGE || 'kp_slot_change',
+        provider: whatsapp.providerFor('slotchange'),
+        templateName: whatsapp.providerFor('slotchange') === 'gupshup'
+          ? (process.env.GUPSHUP_TMPL_SLOTCHANGE || GUPSHUP_SLOTCHANGE_ID)
+          : (process.env.WAPI_TMPL_SLOT_CHANGE || 'kp_slot_change'),
         targeted: targets.length,
         reportingTime,
         meal,
@@ -875,7 +902,14 @@ const CandidateController = {
       (async () => {
         for (const c of targets) {
           try {
-            const r = await sendWhatsapp.sendSlotChange(c, reportingTime, meal);
+            // Routed by WHATSAPP_PROVIDER_SLOTCHANGE. The Flaxxa number hit a
+            // Meta spam rate limit on 4 Sep and dropped 165 accepted messages;
+            // Gupshup is a separate registered number with its own limits.
+            const r = await whatsapp.sendText('slotchange', c, {
+              flaxxaTemplate: process.env.WAPI_TMPL_SLOT_CHANGE || 'kp_slot_change',
+              gupshupTemplate: process.env.GUPSHUP_TMPL_SLOTCHANGE || GUPSHUP_SLOTCHANGE_ID,
+              values: [reportingTime, meal],
+            });
             if (r?.skipped) throw new Error('WAPI_TMPL_SLOT_CHANGE not configured');
             await Candidate.findByIdAndUpdate(c._id, {
               slotChangeNotifiedAt: new Date(),
@@ -883,6 +917,7 @@ const CandidateController = {
               slotChangeOriginalSlot: c.slot,
               slotChangeError: undefined,
             });
+            await logSend(c, 'slotChange', preview.templateName, r);
             slotChangeRun.sent++;
           } catch (err) {
             slotChangeRun.failed++;
@@ -904,6 +939,120 @@ const CandidateController = {
     }
   },
 
+
+  // ── Flaxxa delivery-status callback ────────────────────────────────────────
+  // Configure this URL in Flaxxa → Developer as the webhook / callback target:
+  //   POST https://<backend>/users/webhooks/wapi?key=<WAPI_WEBHOOK_KEY>
+  //
+  // Flaxxa's callback body shape is undocumented and no status endpoint exists
+  // (every plausible /api/v1 path 404s), so this parser is deliberately loose:
+  // it walks whatever JSON arrives looking for a wamid and a status word, and
+  // stores the raw body either way. Once real callbacks land, tighten it using
+  // the stored samples rather than guessing.
+  wapiWebhook: async (req, res) => {
+    // Always 200 quickly — a webhook that errors or hangs gets retried or
+    // disabled by the sender, and we would rather keep the samples flowing.
+    res.status(200).json({ received: true });
+
+    try {
+      const key = process.env.WAPI_WEBHOOK_KEY;
+      if (key && req.query.key !== key) {
+        console.warn('[wapi-hook] rejected callback with bad key');
+        return;
+      }
+
+      const body = req.body || {};
+      const flat = JSON.stringify(body);
+
+      const wamid = (flat.match(/wamid\.[A-Za-z0-9_=-]+/) || [])[0] || null;
+
+      // Meta's vocabulary: sent → delivered → read, or failed.
+      const statusWord = (flat.match(/"(?:status|state|event|message_status)"\s*:\s*"([^"]+)"/i) || [])[1];
+      const status = (statusWord || '').toLowerCase() || 'unknown';
+
+      const errText =
+        (flat.match(/"(?:error_message|errorMessage|reason|description)"\s*:\s*"([^"]+)"/i) || [])[1] || undefined;
+
+      console.log(`[wapi-hook] ${status}${wamid ? ` ${wamid.slice(0, 28)}…` : ' (no wamid found)'}${errText ? ` — ${errText}` : ''}`);
+
+      if (!wamid) {
+        // Unrecognised shape — keep it so the parser can be fixed from real data.
+        await MessageLog.create({ kind: 'unmatched-callback', status, error: errText, rawCallback: body });
+        return;
+      }
+
+      const log = await MessageLog.findOneAndUpdate(
+        { wamid },
+        {
+          status,
+          error: errText,
+          statusAt: new Date(),
+          $setOnInsert: { rawCallback: body },
+        },
+        { new: true }
+      );
+
+      if (!log) {
+        await MessageLog.create({ wamid, kind: 'unknown', status, error: errText, rawCallback: body });
+        return;
+      }
+
+      // Mirror a real failure onto the candidate so the broadcast status
+      // endpoints stop claiming success for a message that never arrived.
+      if (['failed', 'undelivered', 'error', 'rejected'].includes(status) && log.candidateId) {
+        if (log.kind === 'slotChange') {
+          await Candidate.findByIdAndUpdate(log.candidateId, {
+            $unset: { slotChangeNotifiedAt: 1 },
+            slotChangeError: errText || `delivery ${status}`,
+          }).catch(() => {});
+        } else if (String(log.kind).startsWith('reminder:')) {
+          const type = String(log.kind).split(':')[1];
+          if (REMINDER_TYPES.includes(type)) {
+            await Candidate.findByIdAndUpdate(log.candidateId, {
+              [`remindersSent.${type}`]: false,
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[wapi-hook] handler error:', err.message);
+    }
+  },
+
+  // ── Real delivery outcomes, per message kind ───────────────────────────────
+  getDeliveryReport: async (req, res) => {
+    try {
+      const match = req.query.kind ? { kind: req.query.kind } : {};
+      const rows = await MessageLog.aggregate([
+        { $match: match },
+        { $group: { _id: { kind: '$kind', status: '$status' }, n: { $sum: 1 } } },
+        { $sort: { '_id.kind': 1, '_id.status': 1 } },
+      ]);
+
+      const byKind = {};
+      for (const r of rows) {
+        byKind[r._id.kind] = byKind[r._id.kind] || {};
+        byKind[r._id.kind][r._id.status] = r.n;
+      }
+
+      const recentFailures = await MessageLog.find({
+        status: { $in: ['failed', 'undelivered', 'error', 'rejected'] },
+      }).sort({ statusAt: -1 }).limit(20).select('name phone kind status error statusAt');
+
+      res.json({
+        status: 'success',
+        note:
+          '"accepted" only means Meta took the message. Anything that never ' +
+          'moves past accepted was never confirmed delivered — a callback has ' +
+          'to arrive for that, so check the Flaxxa webhook is configured.',
+        byKind,
+        recentFailures,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
   // ── Admin: slot-change broadcast progress ──────────────────────────────────
   getSlotChangeStatus: async (req, res) => {
     try {
@@ -915,7 +1064,7 @@ const CandidateController = {
       ]);
       res.json({
         status: 'success',
-        templateConfigured: !!(process.env.WAPI_TOKEN && (process.env.WAPI_TMPL_SLOT_CHANGE || 'kp_slot_change')),
+        providers: whatsapp.providerStatus(),
         slot,
         paidInSlot,
         notified,
@@ -948,8 +1097,7 @@ const CandidateController = {
       const {
         type = 'oneDay',
         slot,
-        timeToEvent,
-        venue,
+        params = [],
         excludeAttended = true,
         dryRun = true,
         resend = false,
@@ -962,10 +1110,15 @@ const CandidateController = {
           message: `"type" must be one of: ${REMINDER_TYPES.join(', ')}`,
         });
       }
-      if (!timeToEvent || !venue) {
+      // Each approved template takes a different number of variables — verified
+      // live: reminder_day_before 4, event_day_reminder 3, 2hours_reminder 1.
+      // {{1}} is always the name and is added automatically, so `params` carries
+      // the rest. A wrong count is dropped silently by Meta, so the dry run
+      // reports the totals and you check them before sending.
+      if (!Array.isArray(params)) {
         return res.status(400).json({
           status: 'error',
-          message: '"timeToEvent" and "venue" are required (template variables {{2}} and {{3}})',
+          message: '"params" must be an array of the template variables AFTER the name',
         });
       }
       if (reminderRun.running) {
@@ -976,6 +1129,7 @@ const CandidateController = {
         });
       }
 
+      const templateName = sendWhatsapp.reminderTemplateFor(type);
       const flag = `remindersSent.${type}`;
       const query = { paymentStatus: 'Paid' };
       if (slot) query.slot = slot;
@@ -990,21 +1144,21 @@ const CandidateController = {
         status: 'success',
         dryRun: !!dryRun,
         type,
-        templateName: process.env.WAPI_TMPL_REMINDER || null,
+        templateName,
         targeted: targets.length,
         scope: slot ? `slot="${slot}"` : 'ALL paid registrants (Evening merged into Morning)',
-        timeToEvent,
-        venue,
+        variablesSent: 1 + params.length,
+        preview: [`<name>`, ...params],
         sample: targets.slice(0, 5).map(c => ({
           name: c.name, phone: c.whatsappNumber, slot: c.slot,
         })),
       };
 
-      if (!process.env.WAPI_TMPL_REMINDER) {
+      if (!templateName) {
         return res.status(400).json({
           ...preview,
           status: 'error',
-          message: 'WAPI_TMPL_REMINDER is not set — nothing would be delivered. Set it on Railway first.',
+          message: 'No reminder template configured — nothing would be delivered.',
         });
       }
 
@@ -1035,11 +1189,12 @@ const CandidateController = {
       (async () => {
         for (const c of targets) {
           try {
-            const r = await sendWhatsapp.sendEventReminder(c, timeToEvent, venue);
+            const r = await sendWhatsapp.sendEventReminder(c, type, params);
             // A skipped send used to be recorded as "sent" — the same silent
             // failure that hid the broken certificate delivery for a day.
             if (r?.skipped) throw new Error('WAPI_TMPL_REMINDER not configured');
             await Candidate.findByIdAndUpdate(c._id, { [flag]: true });
+            await logSend(c, `reminder:${type}`, templateName, r);
             reminderRun.sent++;
           } catch (err) {
             reminderRun.failed++;
@@ -1067,6 +1222,7 @@ const CandidateController = {
       if (!REMINDER_TYPES.includes(type)) {
         return res.status(400).json({ status: 'error', message: `Unknown reminder type "${type}"` });
       }
+      const templateName = sendWhatsapp.reminderTemplateFor(type);
       const flag = `remindersSent.${type}`;
       const [paid, notAttended, sent] = await Promise.all([
         Candidate.countDocuments({ paymentStatus: 'Paid' }),
@@ -1076,8 +1232,8 @@ const CandidateController = {
       res.json({
         status: 'success',
         type,
-        templateConfigured: !!process.env.WAPI_TMPL_REMINDER,
-        templateName: process.env.WAPI_TMPL_REMINDER || null,
+        templateConfigured: !!sendWhatsapp.reminderTemplateFor(type),
+        templateName: sendWhatsapp.reminderTemplateFor(type),
         paid,
         notYetAttended: notAttended,
         alreadySent: sent,

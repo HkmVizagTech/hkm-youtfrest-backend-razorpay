@@ -31,8 +31,12 @@
  *                                    MUST match the variable count of the approved
  *                                    template or Meta silently drops the message.
  *   WAPI_TMPL_REMINDER             — Template #4: event-day reminder broadcast
+ *                                    (defaults to kp_event_reminder)
+ *   WAPI_TMPL_SLOT_CHANGE          — Template #5: slot change notice
+ *                                    (defaults to kp_slot_change)
  */
 
+const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
 
@@ -145,7 +149,7 @@ async function sendTemplate(phone, templateName, components = []) {
 /**
  * Send a template with a file attachment in the header (multipart/form-data).
  * Used for Template #3 — certificate PDF delivery.
- * attachmentUrl must be a publicly accessible URL (Cloudinary raw upload works).
+ * `attachment` may be a public URL, a local file path, or a Buffer.
  *
  * NOTE: the multipart field is `components`, NOT `components[]`. Flaxxa runs
  * json_decode() on it, and PHP turns `components[]` into an array, which makes
@@ -155,7 +159,7 @@ async function sendTemplate(phone, templateName, components = []) {
 async function sendTemplateWithAttachment(
   phone,
   templateName,
-  attachmentUrl,
+  attachment,
   bodyComponents = [],
   mimeType = 'application/pdf',
   filename = 'certificate.pdf'
@@ -168,21 +172,35 @@ async function sendTemplateWithAttachment(
   const to = e164(phone);
   const ctx = { templateName, phone: to };
 
-  // Fetch the PDF first so a broken/private Cloudinary URL fails loudly here
-  // rather than looking like a WhatsApp problem.
+  // `attachment` may be an http(s) URL, a local file path, or a Buffer.
+  //
+  // Prefer a local path on the bulk certificate run: the PDF was just written
+  // to disk and uploaded to Cloudinary, so downloading it back over the network
+  // costs seconds per attendee for nothing. At ~900 attendees that round trip
+  // alone was over half an hour of the send window.
   let fileBuffer;
-  try {
-    const fileRes = await axios.get(attachmentUrl, { responseType: 'arraybuffer', timeout: 30000 });
-    fileBuffer = Buffer.from(fileRes.data);
-  } catch (err) {
-    throw new Error(
-      `[wapi] ${templateName} → ${to}: could not download the attachment from ${attachmentUrl} ` +
-      `(${err.response ? `HTTP ${err.response.status}` : err.message})`
-    );
+  if (Buffer.isBuffer(attachment)) {
+    fileBuffer = attachment;
+  } else if (typeof attachment === 'string' && !/^https?:\/\//i.test(attachment)) {
+    try {
+      fileBuffer = fs.readFileSync(attachment);
+    } catch (err) {
+      throw new Error(`[wapi] ${templateName} → ${to}: could not read the attachment at ${attachment} (${err.message})`);
+    }
+  } else {
+    try {
+      const fileRes = await axios.get(attachment, { responseType: 'arraybuffer', timeout: 30000 });
+      fileBuffer = Buffer.from(fileRes.data);
+    } catch (err) {
+      throw new Error(
+        `[wapi] ${templateName} → ${to}: could not download the attachment from ${attachment} ` +
+        `(${err.response ? `HTTP ${err.response.status}` : err.message})`
+      );
+    }
   }
 
-  if (!fileBuffer.length) {
-    throw new Error(`[wapi] ${templateName} → ${to}: attachment at ${attachmentUrl} was empty`);
+  if (!fileBuffer?.length) {
+    throw new Error(`[wapi] ${templateName} → ${to}: attachment was empty`);
   }
 
   const fd = new FormData();
@@ -274,7 +292,13 @@ function certificateVariables(candidate, documentId) {
     .map(v => ({ type: 'text', text: String(values[v] ?? '') }));
 }
 
-async function sendCertificate(candidate, pdfUrl, documentId = null) {
+/**
+ * @param pdfUrl    the Cloudinary URL (still stored on the candidate record)
+ * @param localPath optional path to the PDF already on disk — when given it is
+ *                  used as the upload source instead of re-fetching pdfUrl,
+ *                  which saves seconds per attendee on the bulk run.
+ */
+async function sendCertificate(candidate, pdfUrl, documentId = null, localPath = null) {
   const templateName = process.env.WAPI_TMPL_CERTIFICATE;
   if (!templateName) {
     console.warn('[wapi] WAPI_TMPL_CERTIFICATE not set — skipping certificate delivery');
@@ -287,7 +311,7 @@ async function sendCertificate(candidate, pdfUrl, documentId = null) {
   return sendTemplateWithAttachment(
     candidate.whatsappNumber,
     templateName,
-    pdfUrl,
+    localPath || pdfUrl,
     bodyComponents,
     'application/pdf',
     `certificate-${String(candidate.name || 'participant').replace(/\s+/g, '_')}.pdf`
@@ -295,24 +319,56 @@ async function sendCertificate(candidate, pdfUrl, documentId = null) {
 }
 
 /**
- * Template #4 — Event-Day Reminder (Utility)
- * Variables: {{1}} name, {{2}} timeToEvent, {{3}} venue
+ * Template #4 — Reminders (Utility)
+ *
+ * There is NOT one reminder template — there are three approved in Flaxxa, and
+ * they take DIFFERENT numbers of variables. Verified against the live API on
+ * 4 Sep 2026 by sending each with 1..6 parameters and watching for a wamid:
+ *
+ *   reminder_day_before  → 4 variables   ({{1}} is the name)
+ *   event_day_reminder   → 3 variables   ({{1}} is the name)
+ *   2hours_reminder      → 1 variable    (name only)
+ *
+ * Meta silently drops a message whose parameter count doesn't match, and
+ * Flaxxa still answers HTTP 200 — so a wrong count here is invisible until
+ * nobody receives anything. Rather than hardcode a shape that will rot the
+ * next time a template is edited, the caller supplies the values after the
+ * name and this just passes them through; assertDelivered() catches any
+ * mismatch loudly.
  */
-async function sendEventReminder(candidate, timeToEvent, venue) {
-  const templateName = process.env.WAPI_TMPL_REMINDER;
+const REMINDER_TEMPLATE_DEFAULTS = {
+  threeDay: process.env.WAPI_TMPL_REMINDER_3DAY || null,
+  twoDay:   process.env.WAPI_TMPL_REMINDER_2DAY || null,
+  oneDay:   process.env.WAPI_TMPL_REMINDER_1DAY   || 'reminder_day_before',
+  eventDay: process.env.WAPI_TMPL_REMINDER_EVENTDAY || 'event_day_reminder',
+  twoHour:  process.env.WAPI_TMPL_REMINDER_2HOUR  || '2hours_reminder',
+};
+
+function reminderTemplateFor(type) {
+  return process.env.WAPI_TMPL_REMINDER || REMINDER_TEMPLATE_DEFAULTS[type] || null;
+}
+
+/**
+ * @param type   one of threeDay | twoDay | oneDay | eventDay | twoHour
+ * @param values the template's variables AFTER {{1}} (the name is prepended).
+ *               Pass [] for 2hours_reminder, 2 values for event_day_reminder,
+ *               3 values for reminder_day_before.
+ */
+async function sendEventReminder(candidate, type, values = []) {
+  const templateName = reminderTemplateFor(type);
   if (!templateName) {
-    console.warn('[wapi] WAPI_TMPL_REMINDER not set — skipping event reminder');
+    console.warn(`[wapi] no reminder template configured for "${type}" — skipping`);
     return { skipped: true };
   }
+
+  const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+  const parameters = [
+    { type: 'text', text: clean(candidate.name) || 'Devotee' },
+    ...values.map(v => ({ type: 'text', text: clean(v) })),
+  ];
+
   return sendTemplate(candidate.whatsappNumber, templateName, [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: candidate.name },
-        { type: 'text', text: timeToEvent },
-        { type: 'text', text: venue },
-      ],
-    },
+    { type: 'body', parameters },
   ]);
 }
 
@@ -359,6 +415,7 @@ async function sendSlotChange(candidate, reportingTime, meal) {
 }
 
 module.exports = {
+  reminderTemplateFor,
   sendRegistrationConfirmed,
   sendAttendanceConfirmed,
   sendCertificate,

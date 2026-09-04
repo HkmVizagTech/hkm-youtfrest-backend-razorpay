@@ -14,6 +14,12 @@ CandidateRouter.get("/send", CandidateController.sendTemplate);
 CandidateRouter.post("/admin/send-event-reminder", authenticate(['admin']), CandidateController.sendEventReminder);
 CandidateRouter.get("/admin/reminder-status", authenticate(['admin']), CandidateController.getReminderStatus);
 
+// Flaxxa delivery-status callback. PUBLIC by necessity — Flaxxa posts here and
+// cannot send an Authorization header; it is guarded by ?key=WAPI_WEBHOOK_KEY
+// instead, and it only ever writes message status, never candidate data.
+CandidateRouter.post("/webhooks/wapi", CandidateController.wapiWebhook);
+CandidateRouter.get("/admin/delivery-report", authenticate(['admin']), CandidateController.getDeliveryReport);
+
 // Slot-change broadcast (Evening merged into Morning). Admin-only — this
 // messages hundreds of students and cannot be recalled.
 CandidateRouter.post("/admin/send-slot-change", authenticate(['admin']), CandidateController.sendSlotChange);
