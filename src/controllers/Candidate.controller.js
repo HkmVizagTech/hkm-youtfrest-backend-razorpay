@@ -971,7 +971,15 @@ const CandidateController = {
   // longer than an HTTP request should be held open.
   sendRegistrationLink: async (req, res) => {
     try {
-      const { dryRun = true, resend = false, limit, gender, candidateIds } = req.body || {};
+      // Default to the last 9 hours: the window in which the Flaxxa number was
+      // spam rate-limited, so these are the students whose confirmation was
+      // accepted by Meta and then dropped. Sending to everyone would mean ~900
+      // duplicate messages to people who already have a working group link —
+      // and that volume is exactly what got the other number flagged.
+      const {
+        dryRun = true, resend = false, limit, gender, candidateIds,
+        sinceHours = 9, since,
+      } = req.body || {};
 
       if (registrationResendRun.running) {
         return res.status(409).json({
@@ -986,16 +994,38 @@ const CandidateController = {
       if (gender) query.gender = gender;
       if (!resend) query.registrationResentAt = { $exists: false };
 
+      // Time window. paymentDate is when the confirmation would have fired;
+      // fall back to registrationDate/createdAt for records that predate it.
+      let cutoff = null;
+      if (!candidateIds?.length) {
+        cutoff = since ? new Date(since) : new Date(Date.now() - Number(sinceHours) * 3600 * 1000);
+        if (isNaN(cutoff.getTime())) {
+          return res.status(400).json({ status: 'error', message: `"since" is not a valid date` });
+        }
+        query.$or = [
+          { paymentDate: { $gte: cutoff } },
+          { registrationDate: { $gte: cutoff } },
+          { createdAt: { $gte: cutoff } },
+        ];
+      }
+
       let targets = await Candidate.find(query).sort({ registrationDate: 1 });
       targets = targets.filter(c => normalizePhone(c.whatsappNumber));
       if (limit) targets = targets.slice(0, Number(limit));
 
       const male = targets.filter(c => String(c.gender || '').toLowerCase() !== 'female').length;
 
+      const ist = d => d && new Date(d).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short',
+      }) + ' IST';
+
       const preview = {
         status: 'success',
         dryRun: !!dryRun,
         provider: whatsapp.providerFor('registration'),
+        window: cutoff
+          ? `registered/paid since ${ist(cutoff)} (last ${since ? '—' : sinceHours}h)`
+          : 'explicit candidateIds — no time filter',
         targeted: targets.length,
         split: { boysGroup: male, girlsGroup: targets.length - male },
         sample: targets.slice(0, 5).map(c => ({
