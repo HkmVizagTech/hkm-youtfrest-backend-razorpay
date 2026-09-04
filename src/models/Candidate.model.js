@@ -44,6 +44,14 @@ const candidateSchema = new mongoose.Schema({
   adminAttendanceDate: { type: Date },
   attendanceToken: { type: String },
 
+  // Group-link re-send (5 Sep 2026): the original registration confirmations
+  // went out either on the rate-limited Flaxxa number or on templates whose
+  // rebrand.ly buttons are dead, so an unknown number of students never got a
+  // working group link. Tracked separately from the original confirmation.
+  registrationResentAt: { type: Date },
+  registrationResendWamid: { type: String },
+  registrationResendError: { type: String },
+
   // Slot-change broadcast (Evening merged into Morning). Recorded per
   // candidate so a re-run never double-messages anyone, and so "did we tell
   // this student?" is answerable from the database rather than from logs.

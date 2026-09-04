@@ -25,19 +25,26 @@
 
 const flaxxa = require('./sendWhatsappFlaxxa');
 const gupshup = require('./sendWhatsappGupshupTemplate');
+const { gupshupTemplateFor } = require('./whatsappTemplates');
 
 const KINDS = ['certificate', 'reminder', 'slotchange', 'registration', 'attendance'];
 
+// Gupshup is the DEFAULT as of 4 Sep 2026. The Flaxxa number was spam
+// rate-limited by Meta that afternoon and silently dropped 165 accepted
+// messages; Gupshup is a separate registered number that is delivering.
+// Defaulting here means that when the Flaxxa variables are eventually deleted
+// from Railway, everything lands on the working sender rather than the broken
+// one. Set WHATSAPP_PROVIDER=flaxxa to go back.
 function providerFor(kind) {
   const key = `WHATSAPP_PROVIDER_${String(kind || '').toUpperCase()}`;
-  const name = (process.env[key] || process.env.WHATSAPP_PROVIDER || 'flaxxa').toLowerCase();
-  return name === 'gupshup' ? 'gupshup' : 'flaxxa';
+  const name = (process.env[key] || process.env.WHATSAPP_PROVIDER || 'gupshup').toLowerCase();
+  return name === 'flaxxa' ? 'flaxxa' : 'gupshup';
 }
 
 /** What each provider looks like right now — for the admin health endpoint. */
 function providerStatus() {
   return {
-    default: (process.env.WHATSAPP_PROVIDER || 'flaxxa').toLowerCase(),
+    default: (process.env.WHATSAPP_PROVIDER || 'gupshup').toLowerCase(),
     routing: Object.fromEntries(KINDS.map(k => [k, providerFor(k)])),
     flaxxa: { configured: flaxxa.isConfigured() },
     gupshup: {
@@ -76,4 +83,23 @@ async function sendText(kind, candidate, { flaxxaTemplate, gupshupTemplate, valu
   ]);
 }
 
-module.exports = { providerFor, providerStatus, sendText, flaxxa, gupshup };
+/**
+ * Registration confirmation — the one message that fires continuously as
+ * students sign up, so it is the most damaging to have silently failing.
+ * Gender picks the group: anything that isn't "female" gets the boys' group,
+ * which is also what the Flaxxa path does.
+ */
+async function sendRegistration(candidate) {
+  const provider = providerFor('registration');
+  const gender = String(candidate.gender || '').trim().toLowerCase();
+  const kind = gender === 'female' ? 'registration:female' : 'registration:male';
+
+  if (provider === 'gupshup') {
+    const t = gupshupTemplateFor(kind, candidate, {});
+    if (!t) throw new Error(`[whatsapp] no Gupshup template registered for ${kind}`);
+    return gupshup.sendTemplate(candidate.whatsappNumber, t.id, t.params);
+  }
+  return flaxxa.sendRegistrationConfirmed(candidate);
+}
+
+module.exports = { providerFor, providerStatus, sendText, sendRegistration, flaxxa, gupshup };

@@ -18,6 +18,10 @@ CandidateRouter.get("/admin/reminder-status", authenticate(['admin']), Candidate
 // cannot send an Authorization header; it is guarded by ?key=WAPI_WEBHOOK_KEY
 // instead, and it only ever writes message status, never candidate data.
 CandidateRouter.post("/webhooks/wapi", CandidateController.wapiWebhook);
+// Catch-up broadcast: re-send the registration confirmation + group link.
+CandidateRouter.post("/admin/send-registration-link", authenticate(['admin']), CandidateController.sendRegistrationLink);
+CandidateRouter.get("/admin/registration-resend-status", authenticate(['admin']), CandidateController.getRegistrationResendStatus);
+CandidateRouter.get("/admin/template-check", authenticate(['admin']), CandidateController.getTemplateCheck);
 CandidateRouter.get("/admin/delivery-report", authenticate(['admin']), CandidateController.getDeliveryReport);
 
 // Slot-change broadcast (Evening merged into Morning). Admin-only — this

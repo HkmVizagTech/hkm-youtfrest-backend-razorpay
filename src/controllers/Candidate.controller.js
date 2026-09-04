@@ -63,6 +63,21 @@ const logSend = (candidate, kind, template, result) =>
     sentAt: new Date(),
   }).catch(err => console.warn('[msglog] could not record send:', err.message));
 
+// Registration confirmations fire continuously as students pay, from three
+// different entry points (verifyPayment, the Razorpay webhook, and on-spot
+// walk-in registration). Route them all through one place so the provider,
+// the gender→group choice and the delivery record stay consistent.
+const sendRegistrationConfirmation = (candidate, where) =>
+  whatsapp.sendRegistration(candidate)
+    .then(r => {
+      if (r?.skipped) return;
+      const group = String(candidate.gender || '').trim().toLowerCase() === 'female' ? 'girls' : 'boys';
+      return logSend(candidate, 'registration', `${r?.provider || 'flaxxa'}:${group}`, r);
+    })
+    .catch(err =>
+      console.error(`Registration WhatsApp failed for ${candidate.name} (${where}):`, err.message)
+    );
+
 const normalizePhone = (number) => {
   const digits = (number || '').replace(/\D/g, '');
   if (/^\d{10}$/.test(digits)) return '91' + digits;
@@ -103,6 +118,11 @@ const GUPSHUP_SLOTCHANGE_ID = 'd7c6e193-b649-483c-8e11-afc969d84eb0';
 
 // Reminder broadcast progress. Same deal — the durable record is the
 // remindersSent.<type> flag on each candidate, not this counter.
+let registrationResendRun = {
+  running: false, total: 0, sent: 0, failed: 0,
+  startedAt: null, finishedAt: null, failures: [],
+};
+
 const REMINDER_TYPES = ['threeDay', 'twoDay', 'oneDay', 'eventDay', 'twoHour'];
 let reminderRun = {
   running: false, type: null, total: 0, sent: 0, failed: 0,
@@ -243,7 +263,7 @@ const CandidateController = {
       res.json({ message: 'success', candidate });
 
       if (candidate.whatsappNumber) {
-        sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
+        sendRegistrationConfirmation(candidate, 'verifyPayment').catch(err =>
           console.error('WhatsApp send failed (non-fatal):', err.message)
         );
       }
@@ -295,7 +315,7 @@ const CandidateController = {
           await candidate.save();
 
           if (candidate.whatsappNumber) {
-            sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
+            sendRegistrationConfirmation(candidate, 'webhook').catch(err =>
               console.error('Webhook WhatsApp send failed (non-fatal):', err.message)
             );
           }
@@ -940,6 +960,191 @@ const CandidateController = {
   },
 
 
+
+
+  // ── Admin: re-send the registration confirmation (group link) ──────────────
+  // Not the same thing as the automatic confirmation on payment — this is a
+  // catch-up broadcast for students whose original message never arrived, or
+  // arrived with a dead rebrand.ly button. Same safety shape as the slot-change
+  // broadcast: dryRun defaults true, every success is stamped so a re-run never
+  // double-messages, and it runs in the background because ~900 messages is far
+  // longer than an HTTP request should be held open.
+  sendRegistrationLink: async (req, res) => {
+    try {
+      const { dryRun = true, resend = false, limit, gender, candidateIds } = req.body || {};
+
+      if (registrationResendRun.running) {
+        return res.status(409).json({
+          status: 'error',
+          message: 'A registration re-send is already running',
+          progress: registrationResendRun,
+        });
+      }
+
+      const query = { paymentStatus: 'Paid' };
+      if (candidateIds?.length) query._id = { $in: candidateIds };
+      if (gender) query.gender = gender;
+      if (!resend) query.registrationResentAt = { $exists: false };
+
+      let targets = await Candidate.find(query).sort({ registrationDate: 1 });
+      targets = targets.filter(c => normalizePhone(c.whatsappNumber));
+      if (limit) targets = targets.slice(0, Number(limit));
+
+      const male = targets.filter(c => String(c.gender || '').toLowerCase() !== 'female').length;
+
+      const preview = {
+        status: 'success',
+        dryRun: !!dryRun,
+        provider: whatsapp.providerFor('registration'),
+        targeted: targets.length,
+        split: { boysGroup: male, girlsGroup: targets.length - male },
+        sample: targets.slice(0, 5).map(c => ({
+          name: c.name, phone: c.whatsappNumber, gender: c.gender,
+        })),
+      };
+
+      if (dryRun) {
+        preview.message =
+          `DRY RUN — nothing sent. ${targets.length} student(s) would be re-sent their ` +
+          `group link. Re-send with dryRun:false to actually deliver.`;
+        return res.json(preview);
+      }
+      if (!targets.length) {
+        return res.json({ ...preview, message: 'Nothing to send' });
+      }
+
+      registrationResendRun = {
+        running: true, total: targets.length, sent: 0, failed: 0,
+        startedAt: new Date(), finishedAt: null, failures: [],
+      };
+      res.json({
+        ...preview,
+        started: true,
+        message:
+          `Re-sending to ${targets.length} student(s) in the background. ` +
+          `Poll GET /users/admin/registration-resend-status for progress.`,
+      });
+
+      const throttleMs = Number(process.env.REGISTRATION_RESEND_THROTTLE_MS || 1200);
+      (async () => {
+        for (const c of targets) {
+          try {
+            const r = await whatsapp.sendRegistration(c);
+            if (r?.skipped) throw new Error('registration template not configured');
+            await Candidate.findByIdAndUpdate(c._id, {
+              registrationResentAt: new Date(),
+              registrationResendWamid: r.message_wamid,
+              registrationResendError: undefined,
+            });
+            const group = String(c.gender || '').toLowerCase() === 'female' ? 'girls' : 'boys';
+            await logSend(c, 'registration-resend', `${r?.provider || 'flaxxa'}:${group}`, r);
+            registrationResendRun.sent++;
+          } catch (err) {
+            registrationResendRun.failed++;
+            registrationResendRun.failures.push({ name: c.name, phone: c.whatsappNumber, error: err.message });
+            await Candidate.findByIdAndUpdate(c._id, { registrationResendError: err.message }).catch(() => {});
+            console.error(`❌ Registration re-send failed for ${c.name}:`, err.message);
+          }
+          await new Promise(r => setTimeout(r, throttleMs));
+        }
+        registrationResendRun.running = false;
+        registrationResendRun.finishedAt = new Date();
+        console.log(
+          `📣 Registration re-send finished — sent ${registrationResendRun.sent}, failed ${registrationResendRun.failed}`
+        );
+      })();
+    } catch (err) {
+      registrationResendRun.running = false;
+      if (!res.headersSent) res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  getRegistrationResendStatus: async (req, res) => {
+    try {
+      const [paid, resent, errored] = await Promise.all([
+        Candidate.countDocuments({ paymentStatus: 'Paid' }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', registrationResentAt: { $exists: true } }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', registrationResendError: { $exists: true, $ne: null } }),
+      ]);
+      res.json({
+        status: 'success', paid, resent, pending: paid - resent, errored,
+        currentRun: registrationResendRun,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  // ── Preflight: does every configured template actually work? ───────────────
+  // Every failure this week was a mismatch discovered only by sending:
+  //   • kp_slot_change sent 3 variables to a 1-variable template (certificate)
+  //   • reminders assumed 3 variables where the real templates take 4, 3 and 1
+  //   • a MARKETING template used for a bulk run that Meta then throttled
+  // All of it is answerable from Gupshup's template API before anyone sends.
+  getTemplateCheck: async (req, res) => {
+    try {
+      const { GUPSHUP_TEMPLATES } = require('../utils/whatsappTemplates');
+      const gupshup = require('../utils/sendWhatsappGupshupTemplate');
+
+      let remote = [];
+      let listError = null;
+      try {
+        remote = await gupshup.listTemplates();
+      } catch (err) {
+        listError = err.message;
+      }
+      const byId = new Map(remote.map(t => [t.id, t]));
+
+      const rows = Object.entries(GUPSHUP_TEMPLATES).map(([kind, t]) => {
+        const live = byId.get(t.id);
+        const body = String(live?.data || '');
+        const actualVars = new Set(body.match(/\{\{(\d+)\}\}/g) || []).size;
+        const problems = [];
+
+        if (!live) problems.push('not found on this Gupshup app');
+        else {
+          if (live.status !== 'APPROVED') problems.push(`status is ${live.status}, not APPROVED`);
+          if (actualVars !== t.vars) {
+            problems.push(`template has ${actualVars} variable(s) but the code sends ${t.vars} — Meta would drop this silently`);
+          }
+          if (live.category === 'MARKETING') {
+            problems.push('MARKETING category — throttled harder than UTILITY, risky for bulk sends');
+          }
+        }
+
+        return {
+          kind,
+          expects: t.vars,
+          id: t.id,
+          name: live?.elementName || t.name,
+          status: live?.status || 'MISSING',
+          category: live?.category || '—',
+          type: live?.templateType || '—',
+          actualVars: live ? actualVars : null,
+          ok: problems.length === 0,
+          problems,
+        };
+      });
+
+      let wallet = null;
+      try { wallet = await gupshup.walletBalance(); } catch (e) { /* non-fatal */ }
+
+      res.json({
+        status: 'success',
+        ready: rows.every(r => r.ok) && !listError,
+        listError,
+        wallet,
+        walletWarning: wallet != null && wallet < 50
+          ? `Only ₹${wallet} left — a large run will stop partway`
+          : undefined,
+        providers: whatsapp.providerStatus(),
+        templates: rows,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
   // ── Flaxxa delivery-status callback ────────────────────────────────────────
   // Configure this URL in Flaxxa → Developer as the webhook / callback target:
   //   POST https://<backend>/users/webhooks/wapi?key=<WAPI_WEBHOOK_KEY>
@@ -1366,7 +1571,7 @@ const CandidateController = {
       });
 
       if (candidate.whatsappNumber) {
-        sendWhatsapp.sendRegistrationConfirmed(candidate).catch(err =>
+        sendRegistrationConfirmation(candidate, 'onSpotRegister').catch(err =>
           console.error('On-spot WhatsApp failed (non-fatal):', err.message)
         );
       }

@@ -124,4 +124,33 @@ async function sendTemplateWithDocument(phone, templateId, params, url, filename
   return assertSubmitted(resp, { templateId, phone: to });
 }
 
-module.exports = { sendTemplate, sendTemplateWithDocument, isConfigured, e164 };
+/**
+ * List every template on the app, with status, category and body.
+ *
+ * Flaxxa has no equivalent — which is why the variable counts there had to be
+ * discovered by sending each template 1..6 parameters and watching for a wamid.
+ * Here we can simply ask, so the preflight check does.
+ */
+async function listTemplates() {
+  const appId = process.env.GUPSHUP_APP_ID;
+  if (!appId) throw new Error('GUPSHUP_APP_ID is not set');
+  const res = await axios.get(`https://api.gupshup.io/wa/app/${appId}/template`, {
+    headers: { apikey: apiKey() },
+    timeout: 20000,
+  });
+  return res.data?.templates || res.data?.data || [];
+}
+
+async function walletBalance() {
+  const appId = process.env.GUPSHUP_APP_ID;
+  if (!appId) throw new Error('GUPSHUP_APP_ID is not set');
+  const res = await axios.get(`https://api.gupshup.io/wa/app/${appId}/wallet/balance`, {
+    headers: { apikey: apiKey() },
+    timeout: 20000,
+  });
+  return res.data?.wallet?.balance;
+}
+
+module.exports = {
+  sendTemplate, sendTemplateWithDocument, listTemplates, walletBalance, isConfigured, e164,
+};
