@@ -453,9 +453,13 @@ const CandidateController = {
         candidate.attendance = true;
         candidate.attendanceDate = new Date();
         await candidate.save();
-        sendWhatsapp.sendAttendanceConfirmed(candidate).catch(err =>
-          console.error('Attendance WhatsApp failed (non-fatal):', err.message)
-        );
+        // Fire-and-forget: a WhatsApp problem must never block a student's
+        // check-in at the gate. Routed through the provider and logged, so a
+        // failure is visible in the delivery report afterwards rather than
+        // only in the logs.
+        whatsapp.sendAttendance(candidate)
+          .then(r => (r?.skipped ? null : logSend(candidate, 'attendance', r?.provider || 'flaxxa', r)))
+          .catch(err => console.error(`Attendance WhatsApp failed for ${candidate.name} (non-fatal):`, err.message));
       }
 
       res.json({
@@ -1394,7 +1398,7 @@ const CandidateController = {
       const {
         type = 'oneDay',
         slot,
-        params = [],
+        values = {},
         excludeAttended = true,
         dryRun = true,
         resend = false,
@@ -1412,11 +1416,15 @@ const CandidateController = {
       // {{1}} is always the name and is added automatically, so `params` carries
       // the rest. A wrong count is dropped silently by Meta, so the dry run
       // reports the totals and you check them before sending.
-      if (!Array.isArray(params)) {
-        return res.status(400).json({
-          status: 'error',
-          message: '"params" must be an array of the template variables AFTER the name',
-        });
+      // Sanity-check the template BEFORE targeting anyone: this resolves the
+      // real parameter list and throws on a count mismatch, which Meta would
+      // otherwise accept and then silently drop.
+      let resolved;
+      try {
+        const { gupshupTemplateFor } = require('../utils/whatsappTemplates');
+        resolved = gupshupTemplateFor(`reminder:${type}`, { name: 'Sample Name' }, values);
+      } catch (err) {
+        return res.status(400).json({ status: 'error', message: err.message });
       }
       if (reminderRun.running) {
         return res.status(409).json({
@@ -1444,8 +1452,9 @@ const CandidateController = {
         templateName,
         targeted: targets.length,
         scope: slot ? `slot="${slot}"` : 'ALL paid registrants (Evening merged into Morning)',
-        variablesSent: 1 + params.length,
-        preview: [`<name>`, ...params],
+        templateName: resolved?.name,
+        variablesSent: resolved?.params?.length,
+        preview: resolved?.params,
         sample: targets.slice(0, 5).map(c => ({
           name: c.name, phone: c.whatsappNumber, slot: c.slot,
         })),
@@ -1486,12 +1495,12 @@ const CandidateController = {
       (async () => {
         for (const c of targets) {
           try {
-            const r = await sendWhatsapp.sendEventReminder(c, type, params);
+            const r = await whatsapp.sendReminder(c, type, values);
             // A skipped send used to be recorded as "sent" — the same silent
             // failure that hid the broken certificate delivery for a day.
             if (r?.skipped) throw new Error('WAPI_TMPL_REMINDER not configured');
             await Candidate.findByIdAndUpdate(c._id, { [flag]: true });
-            await logSend(c, `reminder:${type}`, templateName, r);
+            await logSend(c, `reminder:${type}`, resolved?.name || templateName, r);
             reminderRun.sent++;
           } catch (err) {
             reminderRun.failed++;

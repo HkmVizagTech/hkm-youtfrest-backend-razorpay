@@ -102,4 +102,37 @@ async function sendRegistration(candidate) {
   return flaxxa.sendRegistrationConfirmed(candidate);
 }
 
-module.exports = { providerFor, providerStatus, sendText, sendRegistration, flaxxa, gupshup };
+/**
+ * Reminder, by type. `values` is an object ({ when, reportingTime, meal }) —
+ * not a positional array — because each template takes a different number of
+ * variables in a different order, and the registry owns that mapping.
+ */
+async function sendReminder(candidate, type, values = {}) {
+  const provider = providerFor('reminder');
+  const kind = `reminder:${type}`;
+
+  if (provider === 'gupshup') {
+    const t = gupshupTemplateFor(kind, candidate, values);
+    if (!t) throw new Error(`[whatsapp] no Gupshup template registered for ${kind}`);
+    return gupshup.sendTemplate(candidate.whatsappNumber, t.id, t.params);
+  }
+  // Flaxxa keeps the older positional shape: name first, then the rest.
+  const rest = [values.when, values.reportingTime, values.meal].filter(v => v != null);
+  return flaxxa.sendEventReminder(candidate, type, rest);
+}
+
+/** Attendance confirmation, fired as a student checks in. */
+async function sendAttendance(candidate) {
+  const provider = providerFor('attendance');
+  if (provider === 'gupshup') {
+    const t = gupshupTemplateFor('attendance', candidate, {});
+    if (!t) throw new Error('[whatsapp] no Gupshup template registered for attendance');
+    return gupshup.sendTemplate(candidate.whatsappNumber, t.id, t.params);
+  }
+  return flaxxa.sendAttendanceConfirmed(candidate);
+}
+
+module.exports = {
+  providerFor, providerStatus, sendText, sendRegistration, sendReminder, sendAttendance,
+  flaxxa, gupshup,
+};

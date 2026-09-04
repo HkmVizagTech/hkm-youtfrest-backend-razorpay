@@ -59,27 +59,44 @@ const GUPSHUP_TEMPLATES = {
     params: (c, v) => [c.name, v.reportingTime, v.meal],
   },
 
-  'reminder:twoHour': {
-    id: process.env.GUPSHUP_TMPL_REMINDER_2HOUR || 'ce707c05-54ef-4e80-b0fd-c0f9885288f6',
-    name: 'kpyf_2hr_reminde',
-    category: 'MARKETING', // throttled harder than utility — fine at this volume
-    vars: 2, // {{1}} name, {{2}} reporting time. Venue hardcoded.
-    params: (c, v) => [c.name, v.reportingTime],
+  // Day-before reminder. FOUR variables, not three — {{2}} is the "is {{2}}"
+  // phrase ("tomorrow"), separate from the reporting time in {{3}}. Read back
+  // from the Gupshup API on 5 Sep 2026 rather than assumed; the draft this was
+  // written from had three, and the mismatch would have been dropped silently.
+  'reminder:oneDay': {
+    id: process.env.GUPSHUP_TMPL_REMINDER_1DAY || 'c659d1ed-afa4-4226-ad57-76005f9774e9',
+    name: 'kp26_reminder_day_before',
+    category: 'UTILITY',
+    vars: 4, // {{1}} name, {{2}} when, {{3}} reporting time, {{4}} meal
+    params: (c, v) => [c.name, v.when || 'tomorrow', v.reportingTime, v.meal],
   },
 
+  // Event-day reminder. Correct venue, name in {{1}} — unlike the old
+  // eventday_reminder_kpyf_with_location (b4af5540…), which said "Gadiraju
+  // Palace" and put the start time in {{1}}.
   'reminder:eventDay': {
-    id: process.env.GUPSHUP_TMPL_REMINDER_EVENTDAY || 'b4af5540-be96-4c65-98a5-8c09ee42529d',
-    name: 'eventday_reminder_kpyf_with_location',
+    id: process.env.GUPSHUP_TMPL_REMINDER_EVENTDAY || 'f7cd2b20-e216-4a00-80fc-cda221dfc4bf',
+    name: 'kp_event_day_reminder',
     category: 'UTILITY',
-    vars: 3, // {{1}} START TIME (not the name!), {{2}} reach-by time, {{3}} meal
-    params: (c, v) => [v.startTime, v.reachBy, v.meal],
+    vars: 3, // {{1}} name, {{2}} reporting time, {{3}} meal
+    params: (c, v) => [c.name, v.reportingTime, v.meal],
+  },
+
+  // The morning-of send uses the same template — "Today is the day!" reads
+  // correctly whether it goes out at 7am or two hours before.
+  'reminder:twoHour': {
+    id: process.env.GUPSHUP_TMPL_REMINDER_2HOUR || 'f7cd2b20-e216-4a00-80fc-cda221dfc4bf',
+    name: 'kp_event_day_reminder',
+    category: 'UTILITY',
+    vars: 3, // {{1}} name, {{2}} reporting time, {{3}} meal
+    params: (c, v) => [c.name, v.reportingTime, v.meal],
   },
 
   attendance: {
-    id: process.env.GUPSHUP_TMPL_ATTENDANCE || '88021e4e-88ae-4cba-bdba-f9b1be3b4948',
-    name: 'attendance_confirm',
+    id: process.env.GUPSHUP_TMPL_ATTENDANCE || '5c5a9854-9d5b-4b0d-b258-0f888a2721e3',
+    name: 'kp_attendance',
     category: 'UTILITY',
-    vars: 1, // {{1}} name. Body still says "Krishna Pulse 2K25".
+    vars: 1, // {{1}} name. Carries a "View Schedule" button on HKM's own redirect.
     params: (c) => [c.name],
   },
 
