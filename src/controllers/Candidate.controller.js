@@ -584,7 +584,7 @@ const CandidateController = {
           // Send via Flaxxa WhatsApp BEFORE marking it sent — otherwise a failed
           // delivery still flips certificateSent and nobody ever retries.
           // sendCertificate throws when Flaxxa or Meta reject the message.
-          const waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
+          const waResult = await whatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
           if (waResult && waResult.skipped) {
             throw new Error('WAPI_TMPL_CERTIFICATE is not set — WhatsApp delivery skipped');
           }
@@ -639,7 +639,7 @@ const CandidateController = {
       // Send on WhatsApp first — only mark it sent once Meta has accepted it.
       let waResult;
       try {
-        waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
+        waResult = await whatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
         if (waResult && waResult.skipped) {
           throw new Error('WAPI_TMPL_CERTIFICATE is not set — WhatsApp delivery skipped');
         }
@@ -691,7 +691,7 @@ const CandidateController = {
 
       let waResult;
       try {
-        waResult = await sendWhatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
+        waResult = await whatsapp.sendCertificate(c, cloudinaryResult.url, documentId);
         if (waResult && waResult.skipped) {
           throw new Error('WAPI_TMPL_CERTIFICATE is not set — WhatsApp delivery skipped');
         }

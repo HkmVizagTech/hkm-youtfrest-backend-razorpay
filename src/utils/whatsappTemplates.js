@@ -104,8 +104,8 @@ const GUPSHUP_TEMPLATES = {
     // Utility + document. certificate_youthfest (4b40f2ce…) reads better but is
     // MARKETING, and marketing throttling is exactly what we cannot afford on a
     // ~900-message run.
-    id: process.env.GUPSHUP_TMPL_CERTIFICATE || '1e5b2dd0-3ee7-4d8d-bd41-9a80073b1399',
-    name: 'certificate_kpyf',
+    id: process.env.GUPSHUP_TMPL_CERTIFICATE || '2350c0ac-8c90-44c5-acdb-41d0510860a8',
+    name: 'krishnapulse_certificate',
     category: 'UTILITY',
     vars: 1, // {{1}} name, plus the PDF as the document header
     params: (c) => [c.name],

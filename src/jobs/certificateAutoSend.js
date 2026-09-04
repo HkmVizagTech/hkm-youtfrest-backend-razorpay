@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const Candidate = require('../models/Candidate.model');
 const sendWhatsapp = require('../utils/sendWhatsappFlaxxa');
+const whatsapp = require('../utils/whatsapp');
 const {
   generateCertificatePDF,
   generateDocumentId,
@@ -74,7 +75,10 @@ async function sendCertificateToCandidate(c) {
     // Upload the PDF straight from disk. The Cloudinary URL is still what gets
     // stored on the candidate record, but re-downloading it here would cost
     // seconds per attendee for a file we already have locally.
-    waResult = await sendWhatsapp.sendCertificate(
+    // Routed by WHATSAPP_PROVIDER_CERTIFICATE. Gupshup takes the public
+    // Cloudinary URL; Flaxxa takes the local file to avoid re-downloading what
+    // we just uploaded. Both are passed so either provider works.
+    waResult = await whatsapp.sendCertificate(
       c, cloudinaryResult.url, documentId, certData.outputPath
     );
     if (waResult && waResult.skipped) {

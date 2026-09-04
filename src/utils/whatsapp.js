@@ -132,7 +132,35 @@ async function sendAttendance(candidate) {
   return flaxxa.sendAttendanceConfirmed(candidate);
 }
 
+/**
+ * Certificate delivery — a template with the PDF as a document header.
+ *
+ * The two providers want the file differently:
+ *   Gupshup — a public URL, so the Cloudinary link goes straight through.
+ *   Flaxxa  — the raw bytes as multipart, so it gets the local path (already
+ *             on disk from generation) to avoid re-downloading what we just
+ *             uploaded.
+ *
+ * This is the ~900-message run, so it is also the one most likely to trip a
+ * Meta rate limit. Splitting it across both numbers is a legitimate way to
+ * halve the per-number volume: run part of it, flip
+ * WHATSAPP_PROVIDER_CERTIFICATE, run the rest. The job skips anyone already
+ * sent, so the two halves cannot overlap.
+ */
+async function sendCertificate(candidate, pdfUrl, documentId = null, localPath = null) {
+  const provider = providerFor('certificate');
+
+  if (provider === 'gupshup') {
+    const t = gupshupTemplateFor('certificate', candidate, {});
+    if (!t) throw new Error('[whatsapp] no Gupshup template registered for certificate');
+    if (!pdfUrl) throw new Error('[whatsapp] certificate needs a public PDF URL for Gupshup');
+    const filename = `certificate-${String(candidate.name || 'participant').replace(/\s+/g, '_')}.pdf`;
+    return gupshup.sendTemplateWithDocument(candidate.whatsappNumber, t.id, t.params, pdfUrl, filename);
+  }
+  return flaxxa.sendCertificate(candidate, pdfUrl, documentId, localPath);
+}
+
 module.exports = {
   providerFor, providerStatus, sendText, sendRegistration, sendReminder, sendAttendance,
-  flaxxa, gupshup,
+  sendCertificate, flaxxa, gupshup,
 };
