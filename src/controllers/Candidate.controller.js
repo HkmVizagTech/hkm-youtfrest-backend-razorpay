@@ -964,16 +964,53 @@ const CandidateController = {
       const body = req.body || {};
       const flat = JSON.stringify(body);
 
-      const wamid = (flat.match(/wamid\.[A-Za-z0-9_=-]+/) || [])[0] || null;
+      // Three payload shapes reach this endpoint, and they disagree about what
+      // a message id even is:
+      //
+      //   Gupshup v2  {type:"message-event", payload:{id:"<gupshup uuid>",
+      //                type:"delivered", destination:"91…"}}
+      //   Meta v3     {entry:[{changes:[{value:{statuses:[{id:"wamid.XXX",
+      //                status:"delivered"}]}}]}]}
+      //   Flaxxa      undocumented — treated by the loose fallback below.
+      //
+      // We store whatever id the SEND returned: a wamid for Flaxxa, a Gupshup
+      // UUID for Gupshup. So configure Gupshup for v2 — its callbacks carry the
+      // same UUID we hold, whereas v3 reports Meta's wamid, which we never saw
+      // for a Gupshup send and therefore could never match.
+      let msgId = null;
+      let status = null;
+      let errText;
 
-      // Meta's vocabulary: sent → delivered → read, or failed.
-      const statusWord = (flat.match(/"(?:status|state|event|message_status)"\s*:\s*"([^"]+)"/i) || [])[1];
-      const status = (statusWord || '').toLowerCase() || 'unknown';
+      if (body?.type === 'message-event' && body?.payload) {
+        msgId = body.payload.id || body.payload.gsId || null;
+        status = String(body.payload.type || '').toLowerCase();
+        errText = body.payload.payload?.reason || body.payload.reason;
+      } else if (Array.isArray(body?.entry)) {
+        const st = body.entry?.[0]?.changes?.[0]?.value?.statuses?.[0];
+        if (st) {
+          msgId = st.id || null;
+          status = String(st.status || '').toLowerCase();
+          errText = st.errors?.[0]?.title || st.errors?.[0]?.message;
+        }
+      }
 
-      const errText =
-        (flat.match(/"(?:error_message|errorMessage|reason|description)"\s*:\s*"([^"]+)"/i) || [])[1] || undefined;
+      // Fallback for any shape we have not met yet (Flaxxa included).
+      if (!msgId) {
+        msgId = (flat.match(/wamid\.[A-Za-z0-9_=-]+/) || [])[0]
+             || (flat.match(/"(?:id|messageId|message_id)"\s*:\s*"([0-9a-f-]{20,})"/i) || [])[1]
+             || null;
+      }
+      if (!status) {
+        status = String(
+          (flat.match(/"(?:status|state|event|message_status|type)"\s*:\s*"([^"]+)"/i) || [])[1] || ''
+        ).toLowerCase() || 'unknown';
+      }
+      if (!errText) {
+        errText = (flat.match(/"(?:error_message|errorMessage|reason|description|title)"\s*:\s*"([^"]+)"/i) || [])[1];
+      }
 
-      console.log(`[wapi-hook] ${status}${wamid ? ` ${wamid.slice(0, 28)}…` : ' (no wamid found)'}${errText ? ` — ${errText}` : ''}`);
+      const wamid = msgId;
+      console.log(`[wapi-hook] ${status}${wamid ? ` ${String(wamid).slice(0, 30)}…` : ' (no id found)'}${errText ? ` — ${errText}` : ''}`);
 
       if (!wamid) {
         // Unrecognised shape — keep it so the parser can be fixed from real data.
