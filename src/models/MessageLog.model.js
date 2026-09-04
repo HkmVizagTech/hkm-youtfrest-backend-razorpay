@@ -33,6 +33,8 @@ const messageLogSchema = new mongoose.Schema({
 
   sentAt: { type: Date, default: Date.now },
   statusAt: { type: Date },
+  // 'phone' when the callback had to be matched by recipient rather than id
+  matchedBy: { type: String },
 
   // Flaxxa's callback shape is not documented anywhere we can see, so keep the
   // raw body of the first callback for each message. Once we have real samples

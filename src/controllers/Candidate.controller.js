@@ -980,17 +980,20 @@ const CandidateController = {
       let msgId = null;
       let status = null;
       let errText;
+      let recipient = null;
 
       if (body?.type === 'message-event' && body?.payload) {
         msgId = body.payload.id || body.payload.gsId || null;
         status = String(body.payload.type || '').toLowerCase();
         errText = body.payload.payload?.reason || body.payload.reason;
+        recipient = body.payload.destination || null;
       } else if (Array.isArray(body?.entry)) {
         const st = body.entry?.[0]?.changes?.[0]?.value?.statuses?.[0];
         if (st) {
           msgId = st.id || null;
           status = String(st.status || '').toLowerCase();
           errText = st.errors?.[0]?.title || st.errors?.[0]?.message;
+          recipient = st.recipient_id || null;
         }
       }
 
@@ -1018,7 +1021,12 @@ const CandidateController = {
         return;
       }
 
-      const log = await MessageLog.findOneAndUpdate(
+      // A Meta-v3 callback for a GUPSHUP send reports Meta's wamid, but the
+      // send API only ever gave us Gupshup's own UUID — so the ids cannot
+      // match. Rather than lose those callbacks, fall back to the most recent
+      // still-unresolved message to that phone number. Configuring the webhook
+      // as Gupshup v2 avoids needing this, but this keeps it working if not.
+      let log = await MessageLog.findOneAndUpdate(
         { wamid },
         {
           status,
@@ -1029,8 +1037,25 @@ const CandidateController = {
         { new: true }
       );
 
+      // The Gupshup subscription is app-wide, so callbacks for OTHER projects
+      // on the same number arrive here too. Matching those by phone could
+      // overwrite a Krishna Pulse record belonging to the same person, so the
+      // phone fallback stays off unless explicitly enabled. With the webhook on
+      // Gupshup v2 the ids match directly and it is not needed at all.
+      if (!log && recipient && process.env.WAPI_HOOK_PHONE_FALLBACK === 'true') {
+        const phone = String(recipient).replace(/\D/g, '');
+        log = await MessageLog.findOneAndUpdate(
+          { phone: { $regex: phone.slice(-10) + '$' }, status: { $in: ['accepted', 'enqueued', 'sent'] } },
+          { status, error: errText, statusAt: new Date(), matchedBy: 'phone' },
+          { sort: { sentAt: -1 }, new: true }
+        );
+      }
+
       if (!log) {
-        await MessageLog.create({ wamid, kind: 'unknown', status, error: errText, rawCallback: body });
+        // Not one of ours — almost certainly another project sharing this
+        // Gupshup app. Record it thinly so the volume is visible, but never
+        // let it touch a candidate.
+        await MessageLog.create({ wamid, kind: 'foreign', status, error: errText, phone: recipient });
         return;
       }
 
