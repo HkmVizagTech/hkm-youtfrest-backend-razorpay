@@ -24,6 +24,26 @@ const razorpay = new Razorpay({
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Closed slots ─────────────────────────────────────────────────────────────
+// The Evening slot was merged into the Morning one on 4 Sep 2026. The dropdown
+// is gone from both registration forms, but a student sitting on a cached JS
+// bundle — or already midway through Razorpay checkout — can still post
+// slot:"Evening". Rejecting them would fail a payment that may already have
+// been charged, so coerce instead: they are saved as Morning, which is where
+// they are actually expected, and the event reminders reach them correctly.
+// Set CLOSED_SLOTS="" on Railway to reopen without a deploy.
+const CLOSED_SLOTS = (process.env.CLOSED_SLOTS ?? 'Evening')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const SLOT_FALLBACK = process.env.SLOT_FALLBACK || 'Morning';
+
+const resolveSlot = (slot, who = '') => {
+  if (slot && CLOSED_SLOTS.includes(String(slot).trim().toLowerCase())) {
+    console.warn(`⚠️ "${slot}" slot is closed — saving ${who || 'registration'} as ${SLOT_FALLBACK}`);
+    return SLOT_FALLBACK;
+  }
+  return slot;
+};
+
 const normalizePhone = (number) => {
   const digits = (number || '').replace(/\D/g, '');
   if (/^\d{10}$/.test(digits)) return '91' + digits;
@@ -106,7 +126,7 @@ const CandidateController = {
         accommodationType: formData.accommodationType,
         companyName: formData.companyName,
         whatsappNumber: normalizePhone(formData.whatsappNumber),
-        slot: formData.slot,
+        slot: resolveSlot(formData.slot, formData.name),
         paymentStatus: 'Pending',
         orderId: order.id,
         paymentAmount: numericAmount / 100,
@@ -170,7 +190,7 @@ const CandidateController = {
           accommodationType: formData.accommodationType,
           companyName: formData.companyName,
           whatsappNumber: normalizePhone(formData.whatsappNumber) || String(formData.whatsappNumber),
-          slot: formData.slot,
+          slot: resolveSlot(formData.slot, formData.name),
           orderId: razorpay_order_id,
           paymentAmount: formData.paymentAmount || 49,
           email: formData.email,
@@ -1106,7 +1126,7 @@ const CandidateController = {
         course,
         year,
         email,
-        slot,
+        slot: resolveSlot(slot, name),
         paymentStatus: 'Paid',
         paymentMethod: method,
         paymentId: method === 'UPI' ? 'onsite-upi' : 'onsite-cash',
