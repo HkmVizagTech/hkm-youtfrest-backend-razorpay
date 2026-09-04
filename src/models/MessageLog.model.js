@@ -17,6 +17,12 @@ const mongoose = require('mongoose');
 const messageLogSchema = new mongoose.Schema({
   provider: { type: String, default: 'flaxxa', index: true },
   wamid: { type: String, index: true },
+  // Every other id this message is known by. Gupshup's "enqueued" callback
+  // references the message by ITS id (the one the send API returned), but the
+  // later sent/delivered/read events reference Meta's wamid — which we never
+  // saw at send time. Collecting both means the whole lifecycle matches one
+  // record instead of the later half landing in the 'foreign' bucket.
+  altIds: { type: [String], index: true, default: [] },
   messageId: { type: String },
 
   candidateId: { type: mongoose.Schema.Types.ObjectId, ref: 'Candidate', index: true },

@@ -1109,6 +1109,18 @@ const CandidateController = {
     }
   },
 
+  // ── Debug: raw callback bodies, to fix the parser from evidence ───────────
+  getCallbackSamples: async (req, res) => {
+    try {
+      const rows = await MessageLog.find({ rawCallback: { $exists: true } })
+        .sort({ createdAt: -1 }).limit(Number(req.query.limit) || 5)
+        .select('kind status wamid altIds phone rawCallback createdAt');
+      res.json({ status: 'success', count: rows.length, samples: rows });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
   // ── Preflight: does every configured template actually work? ───────────────
   // Every failure this week was a mismatch discovered only by sending:
   //   • kp_slot_change sent 3 variables to a 1-variable template (certificate)
@@ -1251,6 +1263,18 @@ const CandidateController = {
         errText = (flat.match(/"(?:error_message|errorMessage|reason|description|title)"\s*:\s*"([^"]+)"/i) || [])[1];
       }
 
+      // Collect EVERY id the callback mentions, not just the primary one.
+      const ids = new Set();
+      const addId = v => { if (v && typeof v === 'string' && v.length > 8) ids.add(v); };
+      addId(msgId);
+      addId(body?.payload?.id);
+      addId(body?.payload?.gsId);
+      addId(body?.payload?.payload?.id);
+      addId(body?.payload?.payload?.whatsappMessageId);
+      addId(body?.payload?.payload?.gsId);
+      for (const m of flat.match(/wamid\.[A-Za-z0-9_=-]+/g) || []) addId(m);
+      const idList = [...ids];
+
       const wamid = msgId;
       console.log(`[wapi-hook] ${status}${wamid ? ` ${String(wamid).slice(0, 30)}…` : ' (no id found)'}${errText ? ` — ${errText}` : ''}`);
 
@@ -1266,12 +1290,13 @@ const CandidateController = {
       // still-unresolved message to that phone number. Configuring the webhook
       // as Gupshup v2 avoids needing this, but this keeps it working if not.
       let log = await MessageLog.findOneAndUpdate(
-        { wamid },
+        { $or: [{ wamid: { $in: idList } }, { altIds: { $in: idList } }] },
         {
           status,
           error: errText,
           statusAt: new Date(),
-          $setOnInsert: { rawCallback: body },
+          // Remember the other ids so the next event in the lifecycle matches.
+          $addToSet: { altIds: { $each: idList } },
         },
         { new: true }
       );
@@ -1294,7 +1319,14 @@ const CandidateController = {
         // Not one of ours — almost certainly another project sharing this
         // Gupshup app. Record it thinly so the volume is visible, but never
         // let it touch a candidate.
-        await MessageLog.create({ wamid, kind: 'foreign', status, error: errText, phone: recipient });
+        const seen = await MessageLog.countDocuments({ kind: 'foreign', rawCallback: { $exists: true } });
+        await MessageLog.create({
+          wamid, kind: 'foreign', status, error: errText, phone: recipient,
+          altIds: idList,
+          // Keep the first 25 raw bodies only — enough to inspect the shapes
+          // without storing every other project's traffic forever.
+          rawCallback: seen < 25 ? body : undefined,
+        });
         return;
       }
 
