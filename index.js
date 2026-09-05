@@ -7,6 +7,7 @@ const { userRouter } = require('./src/routes/user.Routes');
 const { CollegeRouter } = require('./src/routes/college.routes');
 const { CandidateController } = require('./src/controllers/Candidate.controller');
 const { startCertificateAutoSendJob } = require('./src/jobs/certificateAutoSend');
+const { startReminderJobs } = require('./src/jobs/reminderAutoSend');
 const { seedCollegeAdmins } = require('./src/utils/seedCollegeAdmins');
 const { seedAdmins } = require('./src/utils/seedAdmins');
 const bodyParser = require('body-parser');
@@ -77,6 +78,7 @@ const connectWithRetry = async (attempt = 1) => {
     await seedCollegeAdmins();
     await seedAdmins();
     startCertificateAutoSendJob();
+    startReminderJobs();
   } catch (err) {
     global.__lastDbError = err.message;
     console.error(`❌ DB connection failed (attempt ${attempt}):`, err.message);
