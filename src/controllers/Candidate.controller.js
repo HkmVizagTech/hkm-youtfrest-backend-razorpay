@@ -1339,10 +1339,28 @@ const CandidateController = {
             slotChangeError: errText || `delivery ${status}`,
           }).catch(() => {});
         } else if (String(log.kind).startsWith('reminder:')) {
+          // DO NOT clear remindersSent.<type> here.
+          //
+          // It used to be set back to false so a failed reminder could be
+          // re-sent. That is safe for a manual broadcast, but reminderAutoSend
+          // selects targets with { [flag]: { $ne: true } } -- which matches
+          // false -- and its window stays open while the job polls every 5
+          // minutes. The two combined into a NON-TERMINATING retry loop on
+          // 5 Sep: ~247 numbers that Meta rejects with #131026 (not a WhatsApp
+          // account) were re-sent, failed, reset, and re-sent again, observed
+          // at roughly 100 extra sends per half hour -- gated by callback
+          // round-trip rather than the poll interval, but with no end state.
+          // A steady trickle of guaranteed-failing sends is what degrades a
+          // number's quality rating, and that is how the Flaxxa number got
+          // spam-restricted the week before.
+          //
+          // A hard delivery failure (not on WhatsApp, per-user limit) does not
+          // succeed on retry, and the event-day reminder covers the same
+          // audience anyway. Record the reason; leave the flag alone.
           const type = String(log.kind).split(':')[1];
           if (REMINDER_TYPES.includes(type)) {
             await Candidate.findByIdAndUpdate(log.candidateId, {
-              [`remindersSent.${type}`]: false,
+              [`reminderErrors.${type}`]: errText || `delivery ${status}`,
             }).catch(() => {});
           }
         }
