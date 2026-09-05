@@ -1353,6 +1353,130 @@ const CandidateController = {
   },
 
   // ── Real delivery outcomes, per message kind ───────────────────────────────
+  // ── One poll for the whole messaging picture ───────────────────────────────
+  // The admin panel refreshes this every few seconds during the event and on
+  // certificate morning. It deliberately touches only Mongo — no Gupshup API
+  // calls — so it stays fast and cannot be rate-limited. Template validation
+  // lives in /admin/template-check, which is an on-demand button instead.
+  getMessagingOverview: async (req, res) => {
+    try {
+      const { windowOpensAt, SCHEDULE } = require('../jobs/reminderAutoSend');
+      const { certificateWindowOpensAt } = require('../jobs/certificateAutoSend');
+      const now = Date.now();
+
+      // ── What actually happened to every message we have sent ──────────────
+      const rows = await MessageLog.aggregate([
+        { $group: { _id: { kind: '$kind', status: '$status' }, n: { $sum: 1 } } },
+      ]);
+      const byKind = {};
+      for (const r of rows) {
+        const k = r._id.kind || 'unknown';
+        byKind[k] = byKind[k] || {};
+        byKind[k][r._id.status || 'unknown'] = r.n;
+      }
+
+      const recentFailures = await MessageLog.find({
+        status: { $in: ['failed', 'undelivered', 'error', 'rejected'] },
+      }).sort({ statusAt: -1, createdAt: -1 }).limit(25)
+        .select('name phone kind status error statusAt createdAt');
+
+      const lastSent = await MessageLog.findOne().sort({ sentAt: -1 }).select('sentAt kind');
+      const lastCallback = await MessageLog.findOne({ statusAt: { $exists: true } })
+        .sort({ statusAt: -1 }).select('statusAt status kind');
+
+      // ── Certificates ───────────────────────────────────────────────────────
+      const MAX_ATTEMPTS = Number(process.env.CERTIFICATE_MAX_ATTEMPTS || 3);
+      const [certEligible, certSent] = await Promise.all([
+        Candidate.countDocuments({ attendance: true, paymentStatus: 'Paid' }),
+        Candidate.countDocuments({ attendance: true, paymentStatus: 'Paid', certificateSent: true }),
+      ]);
+      const certFailing = await Candidate.find({
+        attendance: true, paymentStatus: 'Paid',
+        certificateSent: { $ne: true },
+        certificateAttempts: { $gte: 1 },
+      }).sort({ certificateLastAttemptAt: -1 }).limit(50)
+        .select('name whatsappNumber certificateAttempts certificateLastError certificateLastAttemptAt');
+
+      const certOpensAt = certificateWindowOpensAt();
+      const certificate = {
+        eligible: certEligible,
+        sent: certSent,
+        pending: certEligible - certSent,
+        failing: certFailing.length,
+        // Anything at the attempt cap will never be retried by the job — an
+        // admin has to fix the number and resend by hand.
+        needsManualFix: certFailing
+          .filter(c => (c.certificateAttempts || 0) >= MAX_ATTEMPTS)
+          .map(c => ({
+            name: c.name, phone: c.whatsappNumber,
+            attempts: c.certificateAttempts, error: c.certificateLastError,
+          })),
+        retrying: certFailing
+          .filter(c => (c.certificateAttempts || 0) < MAX_ATTEMPTS)
+          .map(c => ({
+            name: c.name, phone: c.whatsappNumber,
+            attempts: c.certificateAttempts, error: c.certificateLastError,
+            lastAttemptAt: c.certificateLastAttemptAt,
+          })),
+        maxAttempts: MAX_ATTEMPTS,
+        opensAt: certOpensAt,
+        open: now >= certOpensAt.getTime(),
+        jobEnabled: (process.env.AUTO_SEND_CERTIFICATES ?? 'true') === 'true',
+      };
+
+      // ── Reminders ──────────────────────────────────────────────────────────
+      const paid = await Candidate.countDocuments({ paymentStatus: 'Paid' });
+      const notAttended = await Candidate.countDocuments({
+        paymentStatus: 'Paid', attendance: { $ne: true },
+      });
+      const reminders = [];
+      for (const type of Object.keys(SCHEDULE)) {
+        const cfg = SCHEDULE[type];
+        const sent = await Candidate.countDocuments({
+          paymentStatus: 'Paid', [`remindersSent.${type}`]: true,
+        });
+        const audience = cfg.excludeAttended ? notAttended : paid;
+        const at = windowOpensAt(type);
+        reminders.push({
+          type,
+          audience,
+          audienceLabel: cfg.excludeAttended ? 'paid, not yet checked in' : 'all paid',
+          sent,
+          pending: Math.max(audience - sent, 0),
+          opensAt: at,
+          open: now >= at.getTime(),
+        });
+      }
+
+      // ── Attendance, for context during check-in ────────────────────────────
+      const attended = await Candidate.countDocuments({
+        paymentStatus: 'Paid', attendance: true,
+      });
+
+      res.json({
+        status: 'success',
+        serverTimeIst: new Date().toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium',
+        }) + ' IST',
+        note:
+          '"accepted" only means the provider took the message. A message that ' +
+          'never moves past accepted was never confirmed delivered — that needs ' +
+          'a delivery callback to arrive.',
+        providers: whatsapp.providerStatus(),
+        totals: { paid, attended, notAttended },
+        lastSentAt: lastSent?.sentAt || null,
+        lastCallbackAt: lastCallback?.statusAt || null,
+        byKind,
+        recentFailures,
+        certificate,
+        reminders,
+        remindersJobEnabled: (process.env.AUTO_SEND_REMINDERS ?? 'true') === 'true',
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
   getDeliveryReport: async (req, res) => {
     try {
       const match = req.query.kind ? { kind: req.query.kind } : {};

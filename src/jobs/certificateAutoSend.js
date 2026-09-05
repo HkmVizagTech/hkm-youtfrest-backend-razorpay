@@ -222,4 +222,4 @@ function startCertificateAutoSendJob() {
   setInterval(() => runCertificateAutoSend().catch(() => {}), intervalMs);
 }
 
-module.exports = { runCertificateAutoSend, startCertificateAutoSendJob };
+module.exports = { runCertificateAutoSend, startCertificateAutoSendJob, certificateWindowOpensAt };

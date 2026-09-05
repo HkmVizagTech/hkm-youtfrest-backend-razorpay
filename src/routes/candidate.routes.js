@@ -24,6 +24,8 @@ CandidateRouter.get("/admin/registration-resend-status", authenticate(['admin'])
 CandidateRouter.get("/admin/callback-samples", authenticate(['admin']), CandidateController.getCallbackSamples);
 CandidateRouter.get("/admin/template-check", authenticate(['admin']), CandidateController.getTemplateCheck);
 CandidateRouter.get("/admin/delivery-report", authenticate(['admin']), CandidateController.getDeliveryReport);
+// Everything the admin Messaging page polls, in one Mongo-only call.
+CandidateRouter.get("/admin/messaging-overview", authenticate(['admin']), CandidateController.getMessagingOverview);
 
 // Slot-change broadcast (Evening merged into Morning). Admin-only — this
 // messages hundreds of students and cannot be recalled.
