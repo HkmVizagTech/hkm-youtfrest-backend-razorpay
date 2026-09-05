@@ -14,6 +14,15 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
 let isRunning = false;
 
+// Live progress for the admin "Send all certificates" button. Deliberately not
+// the source of truth -- certificateSent on each candidate is -- so a restart
+// mid-run loses the counter but never re-sends anyone already done.
+let progress = {
+  running: false, trigger: null, total: 0, sent: 0, failed: 0,
+  currentName: null, startedAt: null, finishedAt: null, failures: [],
+};
+const getProgress = () => ({ ...progress });
+
 const CERTIFICATE_SEND_TIME = process.env.CERTIFICATE_SEND_TIME || '09:00';
 const SEND_DELAY_DAYS = Number(process.env.CERTIFICATE_SEND_DELAY_DAYS || 1);
 const MAX_ATTEMPTS = Number(process.env.CERTIFICATE_MAX_ATTEMPTS || 3);
@@ -95,7 +104,8 @@ async function sendCertificateToCandidate(c) {
   };
 }
 
-async function runCertificateAutoSend() {
+async function runCertificateAutoSend(options = {}) {
+  const { force = false, trigger = 'auto' } = options;
   if (isRunning) return { skipped: 'already-running' };
   isRunning = true;
   const results = { scanned: 0, sent: 0, failed: 0, failedNames: [] };
@@ -106,7 +116,11 @@ async function runCertificateAutoSend() {
     results.windowOpensAt = opensAt;
 
     // Nothing goes out before the window opens — one moment for the whole event.
-    if (now < opensAt) {
+    // `force` is the admin "Send all now" button, which deliberately bypasses
+    // the schedule; everything else about the run (eligibility, the attempt
+    // cap, the throttle, marking sent only after the provider accepts) is
+    // identical, so a forced run and the 09:00 run cannot disagree.
+    if (now < opensAt && !force) {
       results.waiting = true;
       return results;
     }
@@ -142,6 +156,11 @@ async function runCertificateAutoSend() {
 
     if (!eligible.length) return results;
 
+    progress = {
+      running: true, trigger, total: eligible.length, sent: 0, failed: 0,
+      currentName: null, startedAt: new Date(), finishedAt: null, failures: [],
+    };
+
     console.log(
       `🎓 Auto-send: ${eligible.length} paid + attended candidate(s) awaiting certificates. ` +
       `Window opened ${ist(opensAt)}; now ${ist(now)}.`
@@ -149,6 +168,7 @@ async function runCertificateAutoSend() {
 
     for (let i = 0; i < eligible.length; i++) {
       const c = eligible[i];
+      progress.currentName = c.name;
       try {
         const result = await sendCertificateToCandidate(c);
         await Candidate.findByIdAndUpdate(c._id, {
@@ -161,6 +181,7 @@ async function runCertificateAutoSend() {
           certificateFileName: `${result.documentId}.pdf`,
         });
         results.sent++;
+        progress.sent++;
         console.log(`✅ Auto certificate sent to ${c.name} (${result.documentId})`);
       } catch (err) {
         const attempts = (c.certificateAttempts || 0) + 1;
@@ -171,7 +192,8 @@ async function runCertificateAutoSend() {
         }).catch(() => {});
 
         results.failed++;
-        results.failedNames.push({ name: c.name, attempts, error: err.message });
+        progress.failed++;
+        progress.failures.push({ name: c.name, phone: c.whatsappNumber, attempts, error: err.message });
         console.error(
           `❌ Auto certificate failed for ${c.name} (attempt ${attempts}/${MAX_ATTEMPTS}):`,
           err.message
@@ -185,8 +207,14 @@ async function runCertificateAutoSend() {
     }
   } catch (err) {
     console.error('❌ Auto certificate job error:', err.message);
+    progress.error = err.message;
   } finally {
     isRunning = false;
+    if (progress.running) {
+      progress.running = false;
+      progress.currentName = null;
+      progress.finishedAt = new Date();
+    }
   }
 
   return results;
@@ -222,4 +250,7 @@ function startCertificateAutoSendJob() {
   setInterval(() => runCertificateAutoSend().catch(() => {}), intervalMs);
 }
 
-module.exports = { runCertificateAutoSend, startCertificateAutoSendJob, certificateWindowOpensAt };
+module.exports = {
+  runCertificateAutoSend, startCertificateAutoSendJob,
+  certificateWindowOpensAt, getProgress,
+};

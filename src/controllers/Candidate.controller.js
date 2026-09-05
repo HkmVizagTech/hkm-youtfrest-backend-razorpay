@@ -204,10 +204,15 @@ const CandidateController = {
       await candidate.save();
       res.json(order);
     } catch (err) {
+      // Answer the student FIRST. Diagnostics must never sit between a failure
+      // and the response -- if logging threw, the request would hang and the
+      // browser would spin forever instead of showing an error.
       const message = describeError(err);
-      console.error('createOrder error:', message);
-      logRawError('createOrder', err);
       res.status(500).json({ status: 'error', message });
+      try {
+        console.error('createOrder error:', message);
+        logRawError('createOrder', err);
+      } catch (_) { /* logging must never affect the request */ }
     }
   },
 
@@ -1391,6 +1396,75 @@ const CandidateController = {
   },
 
   // ── Real delivery outcomes, per message kind ───────────────────────────────
+  // ── Admin: send every pending certificate now ──────────────────────────────
+  // The existing POST /send-certificates runs the whole batch inside the
+  // request. At ~1000 attendees and ~5s each that is over an hour -- the HTTP
+  // connection dies long before it finishes, and the admin has no idea whether
+  // it is still going. So this endpoint hands off to the SAME job the 09:00
+  // schedule uses, returns immediately, and the panel polls for progress.
+  //
+  // force:true bypasses only the schedule. Eligibility, the 3-attempt cap, the
+  // throttle and "mark sent only after the provider accepts" are unchanged, so
+  // pressing this cannot double-send anyone the automatic run already handled.
+  sendAllCertificates: async (req, res) => {
+    try {
+      const { runCertificateAutoSend, getProgress } = require('../jobs/certificateAutoSend');
+      const current = getProgress();
+      if (current.running) {
+        return res.status(409).json({
+          status: 'error',
+          message: `A certificate run is already in progress (${current.sent}/${current.total}).`,
+          progress: current,
+        });
+      }
+
+      const [eligible, alreadySent] = await Promise.all([
+        Candidate.countDocuments({ attendance: true, paymentStatus: 'Paid', certificateSent: { $ne: true } }),
+        Candidate.countDocuments({ attendance: true, paymentStatus: 'Paid', certificateSent: true }),
+      ]);
+
+      if (!eligible) {
+        return res.json({ status: 'success', message: 'Nothing to send — every attendee already has their certificate.', eligible: 0, alreadySent });
+      }
+
+      // Fire and forget: the response must not wait on a run that takes an hour.
+      runCertificateAutoSend({ force: true, trigger: `admin:${req.user?.email || 'admin'}` })
+        .catch(err => console.error('Manual certificate run failed:', err.message));
+
+      res.json({
+        status: 'started',
+        message: `Sending ${eligible} certificate(s) in the background. Watch progress on this page.`,
+        eligible,
+        alreadySent,
+        estimatedMinutes: Math.ceil((eligible * 5) / 60),
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  getCertificateRunProgress: async (req, res) => {
+    try {
+      const { getProgress, certificateWindowOpensAt } = require('../jobs/certificateAutoSend');
+      const [eligible, sent, attendedPaid] = await Promise.all([
+        Candidate.countDocuments({ attendance: true, paymentStatus: 'Paid', certificateSent: { $ne: true } }),
+        Candidate.countDocuments({ attendance: true, paymentStatus: 'Paid', certificateSent: true }),
+        Candidate.countDocuments({ attendance: true, paymentStatus: 'Paid' }),
+      ]);
+      const opensAt = certificateWindowOpensAt();
+      res.json({
+        status: 'success',
+        progress: getProgress(),
+        eligible, sent, attendedPaid,
+        opensAt,
+        windowOpen: Date.now() >= opensAt.getTime(),
+        jobEnabled: (process.env.AUTO_SEND_CERTIFICATES ?? 'true') === 'true',
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
   // ── One poll for the whole messaging picture ───────────────────────────────
   // The admin panel refreshes this every few seconds during the event and on
   // certificate morning. It deliberately touches only Mongo — no Gupshup API

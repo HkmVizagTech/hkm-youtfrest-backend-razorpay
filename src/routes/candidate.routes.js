@@ -45,16 +45,22 @@ CandidateRouter.post("/help-desk/fix", authenticate(['admin', 'reception']), Can
 CandidateRouter.post("/on-spot-register", authenticate(['admin', 'reception']), CandidateController.onSpotRegister);
 
 
-CandidateRouter.post('/send-certificates', CandidateController.sendCertificates);
-CandidateRouter.post('/send-single-certificate', CandidateController.sendSingleCertificate);
-CandidateRouter.post('/resend-certificate', CandidateController.resendCertificate); // 🆕 NEW
+// Certificate sends are admin-only. These were public until 5 Sep 2026: any
+// visitor who found POST /users/send-certificates could fire the entire
+// ~1000-certificate batch, and /send was an unprotected page in the client.
+CandidateRouter.post('/send-certificates', authenticate(['admin']), CandidateController.sendCertificates);
+CandidateRouter.post('/send-single-certificate', authenticate(['admin']), CandidateController.sendSingleCertificate);
+CandidateRouter.post('/resend-certificate', authenticate(['admin']), CandidateController.resendCertificate);
+// Background batch — returns immediately, poll certificate-run-status.
+CandidateRouter.post('/admin/send-all-certificates', authenticate(['admin']), CandidateController.sendAllCertificates);
+CandidateRouter.get('/admin/certificate-run-status', authenticate(['admin']), CandidateController.getCertificateRunProgress);
 CandidateRouter.post('/create-order', CandidateController.createOrder);   
 CandidateRouter.post('/verify-payment', CandidateController.verifyPayment); 
 CandidateRouter.post('/', CandidateController.createCandidate);           
 CandidateRouter.post('/webhook', CandidateController.webhook);
 CandidateRouter.post("/mark-attendance", CandidateController.markAttendance);
 CandidateRouter.post('/admin/attendance-scan', CandidateController.adminAttendanceScan);
-CandidateRouter.post('/generate-single-certificate', CandidateController.generateSingleCertificateOnly);
+CandidateRouter.post('/generate-single-certificate', authenticate(['admin']), CandidateController.generateSingleCertificateOnly);
 
 
 CandidateRouter.put('/:id', authenticate(['admin']), CandidateController.updateCandidate);     

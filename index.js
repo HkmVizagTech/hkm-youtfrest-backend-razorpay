@@ -5,6 +5,7 @@ const { Connection } = require('./src/config/db');
 const { CandidateRouter } = require('./src/routes/candidate.routes');
 const { userRouter } = require('./src/routes/user.Routes');
 const { CollegeRouter } = require('./src/routes/college.routes');
+const { FeedbackRouter } = require('./src/routes/feedback.routes');
 const { CandidateController } = require('./src/controllers/Candidate.controller');
 const { startCertificateAutoSendJob } = require('./src/jobs/certificateAutoSend');
 const { startReminderJobs } = require('./src/jobs/reminderAutoSend');
@@ -51,6 +52,7 @@ app.get('/', (_req, res) => res.json({ status: 'ok', service: 'Krishna Pulse API
 app.use('/users', CandidateRouter);
 app.use('/admin/users', userRouter);
 app.use('/college', CollegeRouter);
+app.use('/feedback', FeedbackRouter);
 
 // ── Global error handler ───────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
