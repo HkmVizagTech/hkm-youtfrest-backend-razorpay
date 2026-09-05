@@ -89,7 +89,26 @@ const normalizePhone = (number) => {
 // rather than a normal Error with a .message — without this, failures were
 // logged (and shown to the student) as a bare "undefined".
 const describeError = (err) =>
-  err?.error?.description || err?.message || 'Something went wrong';
+  err?.error?.description
+  || err?.error?.reason
+  || err?.message
+  || (err?.statusCode ? `Payment gateway returned status ${err.statusCode}` : null)
+  || 'Something went wrong';
+
+// "Something went wrong" told us nothing when registrations broke on 5 Sep:
+// describeError only reaches that string when the thrown value has neither
+// .error.description nor .message -- i.e. the Razorpay SDK rejected with a
+// bare object shape we do not unpack. Dump everything the object carries so
+// the next failure names itself instead of needing a deploy to investigate.
+const logRawError = (label, err) => {
+  let raw;
+  try {
+    raw = JSON.stringify(err, Object.getOwnPropertyNames(Object(err)));
+  } catch {
+    raw = String(err);
+  }
+  console.error(`${label} RAW:`, (raw || '').slice(0, 1500));
+};
 
 // The Razorpay SDK exposes no timeout option and uses axios with no default
 // timeout internally — a slow/hanging response from Razorpay's API would
@@ -187,6 +206,7 @@ const CandidateController = {
     } catch (err) {
       const message = describeError(err);
       console.error('createOrder error:', message);
+      logRawError('createOrder', err);
       res.status(500).json({ status: 'error', message });
     }
   },
