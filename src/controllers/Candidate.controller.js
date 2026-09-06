@@ -151,6 +151,15 @@ let reminderRun = {
 const CandidateController = {
   // ── Public: create Razorpay order + save pending candidate ─────────────────
   createOrder: async (req, res) => {
+    // Defense-in-depth: even if someone bypasses the frontend and calls
+    // this endpoint directly, registrations stay closed once toggled off.
+    // Defaults to open — nothing changes unless this env var is explicitly
+    // set to "false", and it can be flipped back to reopen without a
+    // code change or redeploy of new logic.
+    if ((process.env.REGISTRATIONS_OPEN ?? 'true') === 'false') {
+      return res.status(403).json({ status: 'error', message: 'Registrations for Krishna Pulse Youth Fest are currently closed.' });
+    }
+
     const { amount, formData } = req.body;
     const receipt = `receipt_${Date.now()}`;
 
