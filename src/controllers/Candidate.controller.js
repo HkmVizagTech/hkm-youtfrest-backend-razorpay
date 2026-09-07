@@ -1992,6 +1992,66 @@ const CandidateController = {
       res.status(500).json({ status: 'error', message: err.message });
     }
   },
+
+  // ── Admin: one-off Yatra Clubbing cross-promotion broadcast ────────────────
+  // templateId and imageUrl come from the request itself — this never reads
+  // or writes any certificate-related env var, so the two campaigns can
+  // never collide with each other.
+  sendYatraPromo: async (req, res) => {
+    try {
+      const { runYatraPromoSend, getProgress } = require('../jobs/yatraPromoSend');
+      const { templateId, imageUrl } = req.body;
+
+      if (!templateId || !imageUrl) {
+        return res.status(400).json({ status: 'error', message: 'templateId and imageUrl are both required' });
+      }
+
+      const current = getProgress();
+      if (current.running) {
+        return res.status(409).json({
+          status: 'error',
+          message: `A Yatra promo run is already in progress (${current.sent}/${current.total}).`,
+          progress: current,
+        });
+      }
+
+      const [eligible, alreadySent] = await Promise.all([
+        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: { $ne: true } }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: true }),
+      ]);
+
+      if (!eligible) {
+        return res.json({ status: 'success', message: 'Nothing to send — everyone already received it.', eligible: 0, alreadySent });
+      }
+
+      // Fire and forget: this can run for a long time across ~1000+ people.
+      runYatraPromoSend({ templateId, imageUrl, trigger: `admin:${req.user?.email || 'admin'}` })
+        .catch(err => console.error('Manual Yatra promo run failed:', err.message));
+
+      res.json({
+        status: 'started',
+        message: `Sending to ${eligible} registrant(s) in the background. Poll /admin/yatra-promo-status for progress.`,
+        eligible,
+        alreadySent,
+        estimatedMinutes: Math.ceil((eligible * 1.2) / 60),
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  getYatraPromoStatus: async (req, res) => {
+    try {
+      const { getProgress } = require('../jobs/yatraPromoSend');
+      const [eligible, sent] = await Promise.all([
+        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: { $ne: true } }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: true }),
+      ]);
+      res.json({ status: 'success', progress: getProgress(), eligible, sent });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
 };
 
 module.exports = { CandidateController };

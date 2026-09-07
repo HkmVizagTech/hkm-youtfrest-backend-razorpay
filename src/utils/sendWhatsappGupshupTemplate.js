@@ -125,6 +125,30 @@ async function sendTemplateWithDocument(phone, templateId, params, url, filename
 }
 
 /**
+ * Template with an image header — banner/promotional sends.
+ * Same shape as sendTemplateWithDocument, but Gupshup wants `type: 'image'`
+ * and an `image` object (no filename needed, unlike a document).
+ */
+async function sendTemplateWithImage(phone, templateId, params, imageUrl) {
+  if (!isConfigured()) {
+    console.warn(`[gupshup] not configured — skipping ${templateId} with image to ${phone}`);
+    return { skipped: true };
+  }
+  const to = e164(phone);
+  const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+  const resp = await postForm(`${WA_BASE}/template/msg`, {
+    channel: 'whatsapp',
+    source: SOURCE,
+    destination: to,
+    'src.name': APP_NAME,
+    template: { id: templateId, params: params.map(clean) },
+    message: { image: { link: imageUrl }, type: 'image' },
+  });
+  return assertSubmitted(resp, { templateId, phone: to });
+}
+
+/**
  * List every template on the app, with status, category and body.
  *
  * Flaxxa has no equivalent — which is why the variable counts there had to be
@@ -152,5 +176,5 @@ async function walletBalance() {
 }
 
 module.exports = {
-  sendTemplate, sendTemplateWithDocument, listTemplates, walletBalance, isConfigured, e164,
+  sendTemplate, sendTemplateWithDocument, sendTemplateWithImage, listTemplates, walletBalance, isConfigured, e164,
 };

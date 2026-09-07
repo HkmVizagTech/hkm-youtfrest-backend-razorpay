@@ -61,6 +61,12 @@ const candidateSchema = new mongoose.Schema({
   slotChangeOriginalSlot: { type: String },
 
   certificateSent: { type: Boolean, default: false },
+
+  // One-off Yatra Clubbing cross-promotion broadcast to all registrants.
+  // Defined explicitly (unlike the eventDay reminder flag before it) so a
+  // successful send can actually be recorded and excluded from re-sends.
+  yatraPromoSent: { type: Boolean, default: false },
+  yatraPromoSentDate: { type: Date },
   certificateSentDate: { type: Date },
   certificateSentBy: { type: String },
 

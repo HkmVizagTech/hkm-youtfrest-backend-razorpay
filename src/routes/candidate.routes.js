@@ -54,6 +54,11 @@ CandidateRouter.post('/resend-certificate', authenticate(['admin']), CandidateCo
 // Background batch — returns immediately, poll certificate-run-status.
 CandidateRouter.post('/admin/send-all-certificates', authenticate(['admin']), CandidateController.sendAllCertificates);
 CandidateRouter.get('/admin/certificate-run-status', authenticate(['admin']), CandidateController.getCertificateRunProgress);
+
+// One-off Yatra Clubbing cross-promotion broadcast — templateId/imageUrl are
+// supplied per-request, never hardcoded, never touching certificate config.
+CandidateRouter.post('/admin/send-yatra-promo', authenticate(['admin']), CandidateController.sendYatraPromo);
+CandidateRouter.get('/admin/yatra-promo-status', authenticate(['admin']), CandidateController.getYatraPromoStatus);
 CandidateRouter.post('/create-order', CandidateController.createOrder);   
 CandidateRouter.post('/verify-payment', CandidateController.verifyPayment); 
 CandidateRouter.post('/', CandidateController.createCandidate);           
