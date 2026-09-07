@@ -1997,6 +1997,26 @@ const CandidateController = {
   // templateId and imageUrl come from the request itself — this never reads
   // or writes any certificate-related env var, so the two campaigns can
   // never collide with each other.
+  // ── Admin: send the Yatra promo to ONE number as a test ────────────────────
+  // Deliberately bypasses the whole broadcast — no Candidate lookup, no
+  // yatraPromoSent flag touched, so testing can never mark a real
+  // registrant as already-sent or interfere with the real run later.
+  sendYatraPromoTest: async (req, res) => {
+    try {
+      const gupshup = require('../utils/sendWhatsappGupshupTemplate');
+      const { templateId, imageUrl, phone, name } = req.body;
+
+      if (!templateId || !imageUrl || !phone) {
+        return res.status(400).json({ status: 'error', message: 'templateId, imageUrl, and phone are all required' });
+      }
+
+      const result = await gupshup.sendTemplateWithImage(phone, templateId, [name || 'Devotee'], imageUrl);
+      res.json({ status: 'success', message: `Test sent to ${phone}`, result });
+    } catch (err) {
+      res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
   sendYatraPromo: async (req, res) => {
     try {
       const { runYatraPromoSend, getProgress } = require('../jobs/yatraPromoSend');

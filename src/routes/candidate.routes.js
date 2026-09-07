@@ -57,6 +57,7 @@ CandidateRouter.get('/admin/certificate-run-status', authenticate(['admin']), Ca
 
 // One-off Yatra Clubbing cross-promotion broadcast — templateId/imageUrl are
 // supplied per-request, never hardcoded, never touching certificate config.
+CandidateRouter.post('/admin/send-yatra-promo-test', authenticate(['admin']), CandidateController.sendYatraPromoTest);
 CandidateRouter.post('/admin/send-yatra-promo', authenticate(['admin']), CandidateController.sendYatraPromo);
 CandidateRouter.get('/admin/yatra-promo-status', authenticate(['admin']), CandidateController.getYatraPromoStatus);
 CandidateRouter.post('/create-order', CandidateController.createOrder);   
