@@ -31,11 +31,12 @@ async function runYatraPromoSend({ templateId, imageUrl, trigger }) {
   const results = { total: 0, sent: 0, failed: 0, failures: [] };
 
   try {
-    // Everyone who registered for Krishna Pulse and paid — not filtered by
-    // attendance, since this is a promotional cross-send, not an
-    // event-logistics message.
+    // Only people who paid AND actually attended Krishna Pulse — a
+    // no-show never gets this, since they haven't personally experienced
+    // the event this promo is riding on.
     const eligible = await Candidate.find({
       paymentStatus: 'Paid',
+      attendance: true,
       yatraPromoSent: { $ne: true },
     }).select('_id name whatsappNumber');
 

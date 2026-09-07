@@ -2036,8 +2036,8 @@ const CandidateController = {
       }
 
       const [eligible, alreadySent] = await Promise.all([
-        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: { $ne: true } }),
-        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: true }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: { $ne: true } }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: true }),
       ]);
 
       if (!eligible) {
@@ -2064,8 +2064,8 @@ const CandidateController = {
     try {
       const { getProgress } = require('../jobs/yatraPromoSend');
       const [eligible, sent] = await Promise.all([
-        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: { $ne: true } }),
-        Candidate.countDocuments({ paymentStatus: 'Paid', yatraPromoSent: true }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: { $ne: true } }),
+        Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: true }),
       ]);
       res.json({ status: 'success', progress: getProgress(), eligible, sent });
     } catch (err) {
