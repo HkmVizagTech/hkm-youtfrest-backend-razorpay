@@ -2020,7 +2020,7 @@ const CandidateController = {
   sendYatraPromo: async (req, res) => {
     try {
       const { runYatraPromoSend, getProgress } = require('../jobs/yatraPromoSend');
-      const { templateId, imageUrl } = req.body;
+      const { templateId, imageUrl, resendAll } = req.body;
 
       if (!templateId || !imageUrl) {
         return res.status(400).json({ status: 'error', message: 'templateId and imageUrl are both required' });
@@ -2035,22 +2035,24 @@ const CandidateController = {
         });
       }
 
-      const [eligible, alreadySent] = await Promise.all([
+      const [notYetSent, alreadySent] = await Promise.all([
         Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: { $ne: true } }),
         Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: true }),
       ]);
+      const totalAudience = notYetSent + alreadySent;
+      const eligible = resendAll ? totalAudience : notYetSent;
 
       if (!eligible) {
         return res.json({ status: 'success', message: 'Nothing to send — everyone already received it.', eligible: 0, alreadySent });
       }
 
       // Fire and forget: this can run for a long time across ~1000+ people.
-      runYatraPromoSend({ templateId, imageUrl, trigger: `admin:${req.user?.email || 'admin'}` })
+      runYatraPromoSend({ templateId, imageUrl, resendAll: !!resendAll, trigger: `admin:${req.user?.email || 'admin'}` })
         .catch(err => console.error('Manual Yatra promo run failed:', err.message));
 
       res.json({
         status: 'started',
-        message: `Sending to ${eligible} registrant(s) in the background. Poll /admin/yatra-promo-status for progress.`,
+        message: `${resendAll ? 'Resending' : 'Sending'} to ${eligible} registrant(s) in the background. Poll /admin/yatra-promo-status for progress.`,
         eligible,
         alreadySent,
         estimatedMinutes: Math.ceil((eligible * 1.2) / 60),
@@ -2083,6 +2085,7 @@ const CandidateController = {
         progress: getProgress(),
         eligible,
         sent,
+        totalAudience: eligible + sent,
         delivery: {
           accepted: delivery.accepted || 0,
           sent: delivery.sent || 0,

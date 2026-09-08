@@ -21,7 +21,7 @@ let progress = {
 
 const getProgress = () => ({ ...progress });
 
-async function runYatraPromoSend({ templateId, imageUrl, trigger }) {
+async function runYatraPromoSend({ templateId, imageUrl, trigger, resendAll = false }) {
   if (!templateId) throw new Error('templateId is required');
   if (!imageUrl) throw new Error('imageUrl is required');
   if (isRunning) {
@@ -35,11 +35,16 @@ async function runYatraPromoSend({ templateId, imageUrl, trigger }) {
     // Only people who paid AND actually attended Krishna Pulse — a
     // no-show never gets this, since they haven't personally experienced
     // the event this promo is riding on.
-    const eligible = await Candidate.find({
-      paymentStatus: 'Paid',
-      attendance: true,
-      yatraPromoSent: { $ne: true },
-    }).select('_id name whatsappNumber');
+    //
+    // resendAll=true is a deliberate, separate action from the normal
+    // send: it drops the "not already sent" filter so EVERYONE eligible
+    // gets it again, regardless of a prior send. yatraPromoSent stays
+    // true either way — only yatraPromoSentDate moves forward, so there's
+    // still a record of when they were most recently messaged.
+    const query = { paymentStatus: 'Paid', attendance: true };
+    if (!resendAll) query.yatraPromoSent = { $ne: true };
+
+    const eligible = await Candidate.find(query).select('_id name whatsappNumber');
 
     results.total = eligible.length;
     if (!eligible.length) return results;
@@ -49,7 +54,7 @@ async function runYatraPromoSend({ templateId, imageUrl, trigger }) {
       currentName: null, startedAt: new Date(), finishedAt: null, failures: [],
     };
 
-    console.log(`📣 Yatra promo: sending to ${eligible.length} paid registrant(s), triggered by ${trigger || 'admin'}.`);
+    console.log(`📣 Yatra promo${resendAll ? ' (RESEND TO ALL)' : ''}: sending to ${eligible.length} paid registrant(s), triggered by ${trigger || 'admin'}.`);
 
     for (let i = 0; i < eligible.length; i++) {
       const c = eligible[i];
