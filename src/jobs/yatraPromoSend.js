@@ -8,6 +8,7 @@
  */
 
 const Candidate = require('../models/Candidate.model');
+const MessageLog = require('../models/MessageLog.model');
 const gupshup = require('../utils/sendWhatsappGupshupTemplate');
 
 const THROTTLE_MS = Number(process.env.YATRA_PROMO_THROTTLE_MS || 1200);
@@ -54,11 +55,18 @@ async function runYatraPromoSend({ templateId, imageUrl, trigger }) {
       const c = eligible[i];
       progress.currentName = c.name;
       try {
-        await gupshup.sendTemplateWithImage(c.whatsappNumber, templateId, [c.name], imageUrl);
+        const r = await gupshup.sendTemplateWithImage(c.whatsappNumber, templateId, [c.name], imageUrl);
         await Candidate.findByIdAndUpdate(c._id, {
           yatraPromoSent: true,
           yatraPromoSentDate: new Date(),
         });
+        await MessageLog.create({
+          provider: r?.provider || 'gupshup',
+          wamid: r?.message_wamid,
+          messageId: String(r?.message_id ?? ''),
+          candidateId: c._id, name: c.name, phone: c.whatsappNumber,
+          kind: 'yatraPromo', status: 'accepted', sentAt: new Date(),
+        }).catch(() => {});
         results.sent++;
         progress.sent++;
       } catch (err) {

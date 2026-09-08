@@ -2063,11 +2063,35 @@ const CandidateController = {
   getYatraPromoStatus: async (req, res) => {
     try {
       const { getProgress } = require('../jobs/yatraPromoSend');
-      const [eligible, sent] = await Promise.all([
+      const [eligible, sent, deliveryRows, recentFailures] = await Promise.all([
         Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: { $ne: true } }),
         Candidate.countDocuments({ paymentStatus: 'Paid', attendance: true, yatraPromoSent: true }),
+        MessageLog.aggregate([
+          { $match: { kind: 'yatraPromo' } },
+          { $group: { _id: '$status', n: { $sum: 1 } } },
+        ]),
+        MessageLog.find({ kind: 'yatraPromo', status: { $in: ['failed', 'undelivered', 'error', 'rejected'] } })
+          .sort({ statusAt: -1, createdAt: -1 }).limit(25)
+          .select('name phone status error statusAt createdAt'),
       ]);
-      res.json({ status: 'success', progress: getProgress(), eligible, sent });
+
+      const delivery = {};
+      for (const row of deliveryRows) delivery[row._id || 'unknown'] = row.n;
+
+      res.json({
+        status: 'success',
+        progress: getProgress(),
+        eligible,
+        sent,
+        delivery: {
+          accepted: delivery.accepted || 0,
+          sent: delivery.sent || 0,
+          delivered: delivery.delivered || 0,
+          read: delivery.read || 0,
+          failed: (delivery.failed || 0) + (delivery.undelivered || 0) + (delivery.error || 0) + (delivery.rejected || 0),
+        },
+        recentFailures,
+      });
     } catch (err) {
       res.status(500).json({ status: 'error', message: err.message });
     }
